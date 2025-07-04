@@ -1,0 +1,20 @@
+{"ts": 500.0, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.01, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.02, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.03, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.04, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.05, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.06, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.07, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.08, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.09, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.1, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.11, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.12, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.13, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.14, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.15, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.16, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.17, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+{"ts": 500.18, "event": "MADVISE", "pid": 13611, "advice": "MADV_DONTNEED"}
+{"ts": 500.19, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}

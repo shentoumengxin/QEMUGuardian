@@ -1,0 +1,2 @@
+{"ts": 100, "event": "TRACK_OPENAT", "pid": 13606, "bin": "qemu-x86_64", "file": "/var/www/index.html"}
+{"ts": 102, "event": "EXEC", "pid": 13607, "filename": "/bin/sh"}

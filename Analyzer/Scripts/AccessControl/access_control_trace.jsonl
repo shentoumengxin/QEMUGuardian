@@ -1,0 +1,3 @@
+{"ts": 200, "event": "TRACK_OPENAT", "pid": 13608, "bin": "qemu-x86_64", "file": "/var/www/images/../../etc/passwd"}
+{"ts": 201, "event": "TRACK_OPENAT", "pid": 13608, "bin": "qemu-x86_64", "file": "/etc/shadow"}
+{"ts": 202, "event": "SETUID", "pid": 13608, "uid": 0}
