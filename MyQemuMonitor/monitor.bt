@@ -1,109 +1,188 @@
 #!/usr/bin/env bpftrace
-
+#define TS nsecs/1000000000ULL
 BEGIN {
-    printf("Dynamic QEMU-user monitor…\n");
+    // Start monitoring event
+    printf("{\"ts\":%llu,\"event\": \"START\", \"message\": \"Dynamic QEMU-user monitor started\"}\n",TS);
 }
 
-// 1) 一看到第一个 QEMU-user 的 openat，就把它的 PID 加入监控
-tracepoint:syscalls:sys_enter_openat
+// (1) When a process with name starting "qemu-" calls openat, add its PID to monitored list
+tracepoint:syscalls:sys_enter_openat 
 / strncmp(comm, "qemu-", 5) == 0 /
 {
     @monitored[pid] = 1;
-    printf("TRACK OPENAT: pid=%d bin=%s file=%s\n",
+    // Track file open by QEMU-user process
+    printf("{\"ts\":%llu,\"event\": \"TRACK_OPENAT\", \"pid\": %d, \"bin\": \"%s\", \"file\": \"%s\"}\n",TS,
            pid, comm, str(args->filename));
 }
 
-// 当被监控的进程产生任何子进程时（fork/clone/vfork 都会走这里）
-tracepoint:sched:sched_process_fork
+// When a monitored process forks (fork/clone/vfork), add the child PID to monitored list
+tracepoint:sched:sched_process_fork 
 / @monitored[args->parent_pid] /
 {
     @monitored[args->child_pid] = 1;
-    printf("TRACK FORK: parent=%d child=%d\n",
+    // Track fork event
+    printf("{\"ts\":%llu,\"event\": \"TRACK_FORK\", \"parent\": %d, \"child\": %d}\n",TS,
            args->parent_pid, args->child_pid);
 }
-// 3) execve 也要追踪——进程名会变，但 PID 在监控列表里
+
+// (3) Also track execve: if a QEMU-user process executes /usr/bin/qemu-x86_64, mark it as monitored
 tracepoint:syscalls:sys_enter_execve
-/ strncmp(comm, "qemu-", 5) == 0 && str(args->filename) == "/usr/bin/qemu-x86_64" /
-{
-    @monitored[pid] = 1;  // 将该进程标记为受监控的 QEMU-user 进程
-    printf("TRACK QEMU: pid=%d bin=%s\n", pid, str(args->filename));
-}
-
-// 后面的所有探针都只对 @monitored 的 PID 生效
-
-/// —— 在 read 探针里打印 buf —— 
-tracepoint:syscalls:sys_enter_read
 / @monitored[pid] /
 {
-    printf("READ: pid=%d fd=%d buf=\"%s\"\n",
+    /* still monitored after exec */
+    printf("{\"ts\":%llu,\"event\":\"EXEC\",\"pid\":%d,\"filename\":\"%s\"}\n",
+           TS, pid, str(args->filename));
+}
+//(4)If a process with name starting "qemu-" calls execve with /usr/bin/qemu-x86_64, mark it as monitored
+
+tracepoint:sched:sched_process_exec 
+/ strncmp(comm, "qemu-", 5) == 0 /        /*comm new name */
+{
+    @monitored[pid] = 1;
+    printf("{\"ts\":%llu,\"event\":\"TRACK_QEMU\",\"pid\":%d,\"bin\":\"%s\"}\n",
+           TS, pid, comm);
+}
+
+// All subsequent probes only apply to PIDs in @monitored
+
+// Capture read() syscalls in monitored processes (print buffer content)
+tracepoint:syscalls:sys_enter_read 
+/ @monitored[pid] /
+{
+    printf("{\"ts\":%llu,\"event\": \"READ\", \"pid\": %d, \"fd\": %d, \"buf\": \"%s\"}\n",TS,
            pid, args->fd, str(args->buf));
 }
 
-/// —— 在 write 探针里打印 buf ——
-tracepoint:syscalls:sys_enter_write
+// Capture write() syscalls in monitored processes (print buffer content)
+tracepoint:syscalls:sys_enter_write 
 / @monitored[pid] /
 {
-    printf("WRITE: pid=%d fd=%d buf=\"%s\"\n",
+    printf("{\"ts\":%llu,\"event\": \"WRITE\", \"pid\": %d, \"fd\": %d, \"buf\": \"%s\"}\n",TS,
            pid, args->fd, str(args->buf));
 }
 
-tracepoint:syscalls:sys_enter_readlinkat
-/ @monitored[pid] && str(args->pathname)=="/proc/self/cwd" /
+// If a monitored process calls readlinkat on /proc/self/cwd (get current working directory)
+tracepoint:syscalls:sys_enter_readlinkat 
+/ @monitored[pid] && str(args->pathname) == "/proc/self/cwd" /
 {
-    printf("READLINKAT pwd: pid=%d path=%s\n",
+    printf("{\"ts\":%llu,\"event\": \"READLINKAT\", \"pid\": %d, \"path\": \"%s\"}\n",TS,
            pid, str(args->pathname));
 }
 
-tracepoint:syscalls:sys_enter_socket
+// Capture socket() calls by monitored processes (domain and type)
+tracepoint:syscalls:sys_enter_socket 
 / @monitored[pid] /
 {
-    printf("SOCKET: pid=%d domain=%d type=%d\n",
+    printf("{\"ts\":%llu,\"event\": \"SOCKET\", \"pid\": %d, \"domain\": %d, \"type\": %d}\n",TS,
            pid, args->family, args->type);
 }
 
-tracepoint:syscalls:sys_enter_connect
+// Capture connect() calls by monitored processes (destination address)
+tracepoint:syscalls:sys_enter_connect 
 / @monitored[pid] /
 {
-    printf("CONNECT: pid=%d addr=%s\n", pid, str(args->uservaddr));
+    printf("{\"ts\":%llu,\"event\": \"CONNECT\", \"pid\": %d, \"addr\": \"%s\"}\n",TS,
+           pid, str(args->uservaddr));
 }
 
-tracepoint:syscalls:sys_enter_sendto
+// Capture sendto() calls by monitored processes (length of data sent)
+tracepoint:syscalls:sys_enter_sendto 
 / @monitored[pid] /
 {
-    printf("SENDTO: pid=%d len=%d\n", pid, args->len);
+    printf("{\"ts\":%llu,\"event\": \"SENDTO\", \"pid\": %d, \"len\": %d}\n",TS,
+           pid, args->len);
 }
 
-tracepoint:syscalls:sys_enter_recvfrom
+// Capture recvfrom() calls by monitored processes (buffer size to receive)
+tracepoint:syscalls:sys_enter_recvfrom 
 / @monitored[pid] /
 {
-    printf("RECVFROM: pid=%d size=%d\n", pid, args->size);
+    printf("{\"ts\":%llu,\"event\": \"RECVFROM\", \"pid\": %d, \"size\": %d}\n",TS,
+           pid, args->size);
 }
-// 只聚合被监控进程的 mmap
+
+
+
+/* -------- free / alloc plain counters -------- */
+uprobe:/lib/x86_64-linux-gnu/libc.so.6:free     /@monitored[pid] && arg0 != 0/  { @free_cnt  ++; }
+uprobe:/lib/x86_64-linux-gnu/libc.so.6:malloc   /@monitored[pid] && arg0  > 0 /  { @alloc_cnt ++; }
+uprobe:/lib/x86_64-linux-gnu/libc.so.6:calloc   /@monitored[pid] && (arg0*arg1)>0/ { @alloc_cnt ++; }
+uprobe:/lib/x86_64-linux-gnu/libc.so.6:realloc  /@monitored[pid] && arg1  > 0 /  { @alloc_cnt ++; }
+
+/* -------- mmap plain counters -------- */
 tracepoint:syscalls:sys_enter_mmap
 / @monitored[pid] /
 {
-    // 将映射长度按 4KiB 页面单位打到直方图桶里
+    @mmap_total++;                       // total count ++
+
     $pages = args->len / 4096;
-    @mmap_pages[$pages] = count();
+    $cur   = @mmap_max;               // read current max (0 if not set)
+    if ($pages > $cur) {
+        @mmap_max = $pages;           // update max
+    }
 }
 
-// 每 5 秒输出一次直方图，并清空
-interval:s:10
+
+interval:s:1
 {
-    printf("\n--- MMAP size histogram (pages of 4KiB) ---\n");
-    print(@mmap_pages);
-    clear(@mmap_pages);
+    /* FREE_SUM */
+    if (@free_cnt) {
+        printf("{\"ts\":%llu,\"pid\":-1,\"evt\":\"FREE_SUM\",\"meta\":{\"count\":%llu}}\n",
+               nsecs/1000000000ULL, @free_cnt);
+    }
+    clear(@free_cnt);
+
+    /* MMAP_SUM */
+    if (@mmap_total) {
+        printf("{\"ts\":%llu,\"pid\":-1,\"evt\":\"MMAP_SUM\",\"meta\":{\"count\":%llu,\"max_pages\":%llu}}\n",
+               nsecs/1000000000ULL, @mmap_total, @mmap_max);
+    }
+    clear(@mmap_total);
+    clear(@mmap_max);
+
+    /* ALLOC_SUM */
+    if (@alloc_cnt) {
+       printf("{\"ts\":%llu,\"pid\":-1,\"evt\":\"ALLOC_SUM\",\"meta\":{\"count\":%llu}}\n",
+       nsecs/1000000000ULL, @alloc_cnt);
+    }
+    clear(@alloc_cnt);
 }
-tracepoint:syscalls:sys_enter_dup2 / @monitored[pid] / { printf("DUP2: pid=%d oldfd=%d newfd=%d\n", pid, args.oldfd, args.newfd); }
-tracepoint:syscalls:sys_exit_wait4
+
+
+
+// Capture dup2() calls in monitored processes (old and new file descriptors)
+tracepoint:syscalls:sys_enter_dup2 
 / @monitored[pid] /
 {
-    // args.ret == the PID that wait4() just reaped, or -1 on error
-    printf("WAIT4 exited: caller=%d reaped_child=%d\n", pid, args.ret);
+    printf("{\"ts\":%llu,\"event\": \"DUP2\", \"pid\": %d, \"oldfd\": %d, \"newfd\": %d}\n",TS,
+           pid, args->oldfd, args->newfd);
 }
 
-tracepoint:sched:sched_switch / @monitored[args.prev_pid] || @monitored[args.next_pid] / { printf("SCHED_SWITCH: prev_pid=%d next_pid=%d\n", args.prev_pid, args.next_pid); }
-tracepoint:signal:signal_generate / @monitored[args.pid] / { printf("SIGNAL_GENERATE: pid=%d sig=%d\n", args.pid, args.sig); }
+// Capture wait4() return in monitored processes (child process reaped)
+tracepoint:syscalls:sys_exit_wait4 
+/ @monitored[pid] /
+{
+    printf("{\"ts\":%llu,\"event\": \"WAIT4_EXITED\", \"pid\": %d, \"reaped_child\": %d}\n",TS,
+           pid, args->ret);
+}
+
+// Capture context switches involving monitored processes (task out/in)
+tracepoint:sched:sched_switch 
+/ @monitored[args->prev_pid] || @monitored[args->next_pid] /
+{
+    printf("{\"ts\":%llu,\"event\": \"SCHED_SWITCH\", \"prev_pid\": %d, \"next_pid\": %d}\n",TS,
+           args->prev_pid, args->next_pid);
+}
+
+// Capture signals generated for monitored processes
+tracepoint:signal:signal_generate 
+/ @monitored[args->pid] /
+{
+    printf("{\"ts\":%llu,\"event\": \"SIGNAL_GENERATE\", \"pid\": %d, \"sig\": %d}\n",TS,
+           args->pid, args->sig);
+}
+
 END {
-    printf("Dynamic QEMU-user monitor stopped.\n");
+    // End monitoring event
+    printf("{\"ts\":%llu,\"event\": \"END\", \"message\": \"Dynamic QEMU-user monitor stopped\"}\n",TS);
 }
