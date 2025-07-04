@@ -78,7 +78,32 @@ tracepoint:syscalls:sys_enter_recvfrom
 {
     printf("RECVFROM: pid=%d size=%d\n", pid, args->size);
 }
+// 只聚合被监控进程的 mmap
+tracepoint:syscalls:sys_enter_mmap
+/ @monitored[pid] /
+{
+    // 将映射长度按 4KiB 页面单位打到直方图桶里
+    $pages = args->len / 4096;
+    @mmap_pages[$pages] = count();
+}
 
+// 每 5 秒输出一次直方图，并清空
+interval:s:10
+{
+    printf("\n--- MMAP size histogram (pages of 4KiB) ---\n");
+    print(@mmap_pages);
+    clear(@mmap_pages);
+}
+tracepoint:syscalls:sys_enter_dup2 / @monitored[pid] / { printf("DUP2: pid=%d oldfd=%d newfd=%d\n", pid, args.oldfd, args.newfd); }
+tracepoint:syscalls:sys_exit_wait4
+/ @monitored[pid] /
+{
+    // args.ret == the PID that wait4() just reaped, or -1 on error
+    printf("WAIT4 exited: caller=%d reaped_child=%d\n", pid, args.ret);
+}
+
+tracepoint:sched:sched_switch / @monitored[args.prev_pid] || @monitored[args.next_pid] / { printf("SCHED_SWITCH: prev_pid=%d next_pid=%d\n", args.prev_pid, args.next_pid); }
+tracepoint:signal:signal_generate / @monitored[args.pid] / { printf("SIGNAL_GENERATE: pid=%d sig=%d\n", args.pid, args.sig); }
 END {
     printf("Dynamic QEMU-user monitor stopped.\n");
 }

@@ -36,10 +36,6 @@ gcc -std=c99 -D_GNU_SOURCE \
 在另一个终端里，先启动 netcat 监听端口：
 
 ```
-bash
-
-
-复制编辑
 nc -lvp 4444
 ```
 
