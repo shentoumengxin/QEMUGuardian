@@ -7,18 +7,20 @@ Scripts 下是六个 python 脚本以及对应的示例日志文件 , 分别用�
 ### 0.2 OUTPUT FORMAT
 ```
 ============================================================
-[!!!] 高危警报：检测到潜在的【敏感文件访问】漏洞！
-      - 行号: 2
-      - 证据: 尝试访问敏感文件: /etc/shadow
-      - 完整日志: {'ts': 201, 'event': 'TRACK_OPENAT', 'pid': 13608, 'bin': 'qemu-x86_64', 'file': '/etc/shadow'}
+[!!!] High Risk Alert: Potential [Race Condition (Dirty COW-like)] vulnerability detected!
+      - Process ID: 13612
+      - Alert Line: 20
+      - Evidence: Detected 10 madvise calls and 10 writes to /proc/self/mem within the window
+      - Full Log Entry: {"ts": 500.19, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
 ============================================================
 ```
 ```
 ============================================================
-[!!!] 高危警报：检测到潜在的【权限提升】漏洞！
-      - 行号: 3
-      - 证据: 'SETUID' 尝试设置uid为0 (root)
-      - 完整日志: {'ts': 202, 'event': 'SETUID', 'pid': 13608, 'uid': 0}
+[!!!] Medium Risk Alert: Potential [Memory Corruption (Weak Signal)] vulnerability detected!
+      - Process ID: -1
+      - Alert Line: 2
+      - Evidence: Detected abnormally large page allocation via mmap: 2048 pages
+      - Full Log Entry: {"ts": 302, "pid": -1, "evt": "MMAP_SUM", "meta": {"count": 5, "max_pages": 2048}}
 ============================================================
 ```
 
