@@ -11,7 +11,6 @@ SUSPICIOUS_COMMANDS = {
 }
 
 def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
-    import json
     print("\n" + "="*60)
     print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
     print(f"      - Process ID: {pid}")

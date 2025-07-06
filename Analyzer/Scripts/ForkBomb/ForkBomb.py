@@ -1,7 +1,6 @@
 import json
 
 def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
-    import json
     print("\n" + "="*60)
     print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
     print(f"      - Process ID: {pid}")
@@ -25,6 +24,7 @@ def analyze_fork_bomb(log_path, time_window_seconds=2, fork_threshold=50):
                 if log.get('event') == 'TRACK_FORK':
                     ts = log.get('ts', 0.0)
                     window_key = int(ts / time_window_seconds)
+
                     current_count = fork_counts_in_window.get(window_key, 0) + 1
                     fork_counts_in_window[window_key] = current_count
                     
@@ -38,4 +38,4 @@ def analyze_fork_bomb(log_path, time_window_seconds=2, fork_threshold=50):
     if not found: print("No specific threats detected.")
 
 if __name__ == '__main__':
-    analyze_fork_bomb("fork_bomb_trace.jsonl", time_window_seconds=2, fork_threshold=50)
+    analyze_fork_bomb("fork_bomb_trace.jsonl")
