@@ -1,7 +1,5 @@
 import json
 
-# 定义我们认为可疑的、通常由命令注入攻击执行的程序
-# 这个列表保持不变
 SUSPICIOUS_COMMANDS = {
     "/bin/sh",
     "/bin/bash",
@@ -12,28 +10,29 @@ SUSPICIOUS_COMMANDS = {
     "bash",
 }
 
-def print_alert(severity, alert_type, line_num, evidence, full_log_dict):
-    """格式化并打印安全警报"""
+def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
+    import json
     print("\n" + "="*60)
-    print(f"[!!!] {severity}警报：检测到潜在的【{alert_type}】漏洞！")
-    print(f"      - 告警行号: {line_num}")
-    print(f"      - 证据: {evidence}")
-    print(f"      - 完整日志: {json.dumps(full_log_dict)}")
+    print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
+    print(f"      - Process ID: {pid}")
+    print(f"      - Alert Line: {line_num}")
+    print(f"      - Evidence: {evidence}")
+    print(f"      - Full Log Entry: {json.dumps(full_log_dict)}")
     print("="*60)
 
 def analyze_command_injection(log_path):
-    print("\n--- 开始分析 [命令注入] ---")
     found = False
     with open(log_path, 'r') as f:
         for line_num, line in enumerate(f, 1):
             try:
                 log = json.loads(line)
-                # EXEC事件表示进程调用了execve
+                pid = log.get('pid')
+
                 if log.get('event') == 'EXEC' and log.get('filename') in SUSPICIOUS_COMMANDS:
-                    print_alert("高危", "命令注入", line_num, f"执行了可疑的Shell: {log['filename']}", log)
+                    print_alert("High Risk", "Command Injection", line_num, f"Suspicious shell executed: {log['filename']}", log, pid)
                     found = True
             except json.JSONDecodeError: continue
-    if not found: print("未发现明确特征。")
+    if not found: print("No specific threats detected.")
 
 if __name__ == '__main__':
     analyze_command_injection("command_injection_trace.jsonl")
