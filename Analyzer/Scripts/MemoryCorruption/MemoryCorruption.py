@@ -1,7 +1,6 @@
 import json 
 
 def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
-    import json
     print("\n" + "="*60)
     print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
     print(f"      - Process ID: {pid}")
@@ -19,7 +18,7 @@ def analyze_memory_corruption(log_path, max_pages_threshold=1000):
                 pid = log.get('pid')
                 
                 if log.get('event') == 'MPROTECT':
-                    if 'PROT_EXEC' in log.get('perms', ''):
+                    if log.get('exec') == 1:
                         print_alert("High Risk", "Memory Corruption (Shellcode)", line_num, "Detected 'mprotect' call setting executable permissions (PROT_EXEC)", log, pid)
                         found = True
 

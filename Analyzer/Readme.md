@@ -9,9 +9,9 @@ Scripts 下是六个 python 脚本以及对应的示例日志文件 , 分别用�
 ============================================================
 [!!!] High Risk Alert: Potential [Race Condition (Dirty COW-like)] vulnerability detected!
       - Process ID: 13612
-      - Alert Line: 20
-      - Evidence: Detected 10 madvise calls and 10 writes to /proc/self/mem within the window
-      - Full Log Entry: {"ts": 500.19, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
+      - Alert Line: 26
+      - Evidence: Detected 5 madvise calls and 5 writes to /proc/self/mem in 2 seconds, exceeding threshold of (5,5)
+      - Full Log Entry: {"ts": 503.5, "event": "WRITE", "pid": 13612, "filename": "/proc/self/mem", "buf": "rootpl"}
 ============================================================
 ```
 ```
@@ -28,8 +28,6 @@ Scripts 下是六个 python 脚本以及对应的示例日志文件 , 分别用�
 - 检测是否有提权操作 ( PRIVILEGE_ESCALATION_EVENTS = {"SETUID", "SETGID", "SETREUID", "SETRESUID"} ) 且尝试设置uid为0 (root)
 - 检测是否可能访问无权访问的文件 ( 包含 ../ 路径 , 或是在黑名单中的敏感文件 )
 
-- ***Note : 文档中系统调用没有提及 SETUID 等可能的提权操作 , 这里只是假设存在格式形如 {"event":"SETUID", "uid":0} 的事件***
-
 ### 2. CodeInjection
 - 检测是否使用 EXEC syscall 执行了可疑的 shell ( SUSPICIOUS_COMMANDS = { "/bin/sh", "/bin/bash", "/bin/csh", "/usr/bin/sh", "/usr/bin/bash", "sh", "bash"} )
 
@@ -43,13 +41,8 @@ Scripts 下是六个 python 脚本以及对应的示例日志文件 , 分别用�
 - 强特征检测: 检测是否有 mprotect 调用 , 并将一块内存区域的权限标记为可执行 
 - 弱特征检测: 检测是否有异常大的内存映射 , 但这只是一个弱特征 , 表示可能存在大的内存分配 , 而非确切的攻击行为
 
-- ***Note : 文档中系统调用没有提及 MPROTECT 系统调用 , 这里假设存在格式形如 {"ts": <timestamp>, "event": "MPROTECT", "pid": <pid>, "perms": "PROT_READ|PROT_WRITE|PROT_EXEC"} 的事件***
-
 ### 6. RaceCondition
 - 检测是否有高频、并发地调用 mmap , madvise , 和 write ( 针对 /proc/self/mem ) , 具体原理见下文
-
-- ***Note : 文档中系统调用没有提及 MADVICE 系统调用 , 这里假设存在格式形如 {"ts": <timestamp>, "event": "MADVICE", "pid": <pid>, "advice": "MADV_DONTNEED"} 的事件***
-
 
 ---
 

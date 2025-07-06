@@ -1,8 +1,6 @@
 import json
-from collections import deque
 
 def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
-    import json
     print("\n" + "="*60)
     print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
     print(f"      - Process ID: {pid}")
@@ -11,24 +9,31 @@ def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
     print(f"      - Full Log Entry: {json.dumps(full_log_dict)}")
     print("="*60)
 
-def analyze_race_condition_dirty_cow(log_path, window_size=20, madvise_thresh=5, write_thresh=5):
+def analyze_race_condition_dirty_cow(log_path, time_window_seconds=2, madvise_thresh=5, write_thresh=5):
     found = False
-    syscall_window = deque(maxlen=window_size)
+    
+    counts_in_window = {}
+    alerted_windows = set() 
+
     with open(log_path, 'r') as f:
         for line_num, line in enumerate(f, 1):
             try:
                 log = json.loads(line)
                 pid = log.get('pid')
-                syscall_window.append(log)
+                ts = log.get('ts', 0.0)
+                window_key = int(ts / time_window_seconds)
+                madvise_count = counts_in_window.get(window_key, 0)
+                write_count = counts_in_window.get(window_key, 0)
 
-                if len(syscall_window) == window_size:
-                    madvise_count = sum(1 for call in syscall_window if call.get('event') == 'MADVISE' and call.get('advice') == 'MADV_DONTNEED')
-                    write_count = sum(1 for call in syscall_window if call.get('event') == 'WRITE' and call.get('filename') == '/proc/self/mem')
+                if log.get('event') == 'MADVISE' and log.get('advice') == 'MADV_DONTNEED':
+                    counts_in_window[window_key] = madvise_count + 1
+                if log.get('event') == 'WRITE' and log.get('filename') == '/proc/self/mem':
+                    counts_in_window[window_key] = write_count + 1
+                if madvise_count >= madvise_thresh and write_count >= write_thresh and window_key not in alerted_windows:
+                    print_alert("High Risk", "Race Condition (Dirty COW-like)", line_num, f"Detected {madvise_count} madvise calls and {write_count} writes to /proc/self/mem in {time_window_seconds} seconds, exceeding threshold of ({madvise_thresh},{write_thresh}) ", log, pid)
+                    found = True
+                    alerted_windows.add(window_key)
 
-                    if madvise_count >= madvise_thresh and write_count >= write_thresh:
-                        print_alert("High Risk", "Race Condition (Dirty COW-like)", line_num, f"Detected {madvise_count} madvise calls and {write_count} writes to /proc/self/mem within the window", log, pid)
-                        found = True
-                        syscall_window.clear() # 清空窗口避免重复报警
             except json.JSONDecodeError:
                 continue
     if not found: print("No specific threats detected.")
