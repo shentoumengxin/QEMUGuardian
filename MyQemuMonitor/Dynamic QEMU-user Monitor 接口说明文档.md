@@ -162,6 +162,81 @@
   {"ts":<timestamp>,"event":"SIGNAL_GENERATE","pid":<pid>,"sig":<signal_number>}
   ```
 
+已思考 5 秒
+
+下面是新增的三种系统调用事件的 JSON 接口说明，直接补充到你的整体接口文档中即可。
+
+------
+
+### 3.6 SETUID
+
+> 捕获 `setuid(uid)` 系统调用，监控进程尝试改变用户身份的行为。
+
+```json
+{
+  "ts": <timestamp>,   // 单调时钟秒.微秒，脚本宏 TS 提供
+  "event": "SETUID",   // 事件标识
+  "pid": <pid>,        // 触发调用的进程 ID
+  "uid": <uid>         // 目标用户 ID
+}
+```
+
+- **ts**: `nsecs/1e9`
+- **event**: `"SETUID"`
+- **pid**: 进程号
+- **uid**: 调用参数中传入的新 UID
+
+------
+
+### 3.7 MPROTECT
+
+> 捕获 `mprotect(addr, len, prot)` 系统调用，将权限掩码拆为三个布尔字段。
+
+```json
+{
+  "ts": <timestamp>,
+  "event": "MPROTECT",
+  "pid": <pid>,
+  "read": <0|1>,   // 是否包含 PROT_READ
+  "write": <0|1>,  // 是否包含 PROT_WRITE
+  "exec": <0|1>    // 是否包含 PROT_EXEC
+}
+```
+
+- **ts**: 单调时钟秒.微秒
+- **event**: `"MPROTECT"`
+- **pid**: 进程号
+- **read**: `1` 表示原型中含有 `PROT_READ`，否则 `0`
+- **write**: `1` 表示含有 `PROT_WRITE`，否则 `0`
+- **exec**: `1` 表示含有 `PROT_EXEC`，否则 `0`
+
+------
+
+### 3.8 MADVISE
+
+> 捕获 `madvise(addr, len, advice)` 系统调用，将 `advice` 值直接输出为字符串。
+
+```json
+{
+  "ts": <timestamp>,
+  "event": "MADVICE",
+  "pid": <pid>,
+  "advice": "<MADV_XXX>"
+}
+```
+
+- **ts**: 单调时钟秒.微秒
+- **event**: `"MADVICE"`
+- **pid**: 进程号
+- **advice**: 建议类型，脚本中映射为如
+  - `"MADV_NORMAL"`
+  - `"MADV_RANDOM"`
+  - `"MADV_SEQUENTIAL"`
+  - `"MADV_WILLNEED"`
+  - `"MADV_DONTNEED"`
+  - `"MADV_FREE"`
+  - …若非以上则 `"MADV_OTHER"`
+
 ## 4. 使用方法
 
 1. **运行脚本**：以 root 权限运行 bpftrace 脚本。
