@@ -1,16 +1,20 @@
 import json
+import sys
+from rich.console import Console
 
 PRIVILEGE_ESCALATION_EVENTS = {"SETUID", "SETGID", "SETREUID", "SETRESUID"}
 SENSITIVE_FILES = {"/etc/passwd", "/etc/shadow", "/etc/sudoers"}
 
+console = Console()
+
 def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
-    print("\n" + "="*60)
-    print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
-    print(f"      - Process ID: {pid}")
-    print(f"      - Alert Line: {line_num}")
-    print(f"      - Evidence: {evidence}")
-    print(f"      - Full Log Entry: {json.dumps(full_log_dict)}")
-    print("="*60)
+    console.print("[red]\n" + "="*60)
+    console.print(f"[red][!!!] [green]{severity}[/green] Alert: Potential [green][{alert_type}][/green] vulnerability detected!")
+    console.print(f"[red]      - Process ID: [green]{pid}")
+    console.print(f"[red]      - Alert Line: [green]{line_num}")
+    console.print(f"[red]      - Evidence: {evidence}")
+    console.print(f"[red]      - Full Log Entry: {json.dumps(full_log_dict)}")
+    console.print("[red]="*60)
 
 def analyze_access_control(log_path):
     found = False
@@ -34,7 +38,12 @@ def analyze_access_control(log_path):
                         print_alert("High Risk", "Sensitive File Access", line_num, f"Attempt to access sensitive file: {filename}", log, pid)
                         found = True
             except json.JSONDecodeError: continue
-    if not found: print("No specific threats detected.")
+    if not found: console.print("[blue]No specific threats detected.")
+
+def main():
+    print("--- Starting Access Control Analysis... ---")
+    analyze_access_control(sys.argv[1] if len(sys.argv) > 1 else "log.jsonl")
+    print("--- Access Control Analysis Completed ---\n")
 
 if __name__ == '__main__':
-    analyze_access_control("access_control_trace.jsonl")
+    main()

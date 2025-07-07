@@ -4,6 +4,8 @@ Scripts 下是六个 python 脚本以及对应的示例日志文件 , 分别用�
 ### 0.1 HOW TO RUN
 只需在 Analyzer/Scripts/XXXX 目录下用 python3 执行对应 python 脚本即可
 
+***现在只需将日志放入 log.jsonl ， 然后在 Scripts 目录下执行 `python3 run.py` 即可测试所有漏洞***
+
 ### 0.2 OUTPUT FORMAT
 ```
 ============================================================

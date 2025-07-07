@@ -1,4 +1,6 @@
 import json
+import sys
+from rich.console import Console
 
 SUSPICIOUS_COMMANDS = {
     "/bin/sh",
@@ -10,14 +12,16 @@ SUSPICIOUS_COMMANDS = {
     "bash",
 }
 
+console = Console()
+
 def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
-    print("\n" + "="*60)
-    print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
-    print(f"      - Process ID: {pid}")
-    print(f"      - Alert Line: {line_num}")
-    print(f"      - Evidence: {evidence}")
-    print(f"      - Full Log Entry: {json.dumps(full_log_dict)}")
-    print("="*60)
+    console.print("[red]\n" + "="*60)
+    console.print(f"[red][!!!] [green]{severity}[/green] Alert: Potential [green][{alert_type}][/green] vulnerability detected!")
+    console.print(f"[red]      - Process ID: [green]{pid}")
+    console.print(f"[red]      - Alert Line: [green]{line_num}")
+    console.print(f"[red]      - Evidence: {evidence}")
+    console.print(f"[red]      - Full Log Entry: {json.dumps(full_log_dict)}")
+    console.print("[red]="*60)
 
 def analyze_command_injection(log_path):
     found = False
@@ -31,7 +35,12 @@ def analyze_command_injection(log_path):
                     print_alert("High Risk", "Command Injection", line_num, f"Suspicious shell executed: {log['filename']}", log, pid)
                     found = True
             except json.JSONDecodeError: continue
-    if not found: print("No specific threats detected.")
+    if not found: console.print("[blue]No specific threats detected.")
+
+def main():
+    print("--- Starting Command Injection Analysis... ---")
+    analyze_command_injection(sys.argv[1] if len(sys.argv) > 1 else "log.jsonl")
+    print("--- Command Injection Analysis Completed ---\n")
 
 if __name__ == '__main__':
-    analyze_command_injection("command_injection_trace.jsonl")
+    main()

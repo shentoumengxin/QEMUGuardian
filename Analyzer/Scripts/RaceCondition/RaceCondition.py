@@ -1,13 +1,17 @@
 import json
+import sys
+from rich.console import Console
+
+console = Console()
 
 def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
-    print("\n" + "="*60)
-    print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
-    print(f"      - Process ID: {pid}")
-    print(f"      - Alert Line: {line_num}")
-    print(f"      - Evidence: {evidence}")
-    print(f"      - Full Log Entry: {json.dumps(full_log_dict)}")
-    print("="*60)
+    console.print("[red]\n" + "="*60)
+    console.print(f"[red][!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
+    console.print(f"[red]      - Process ID: {pid}")
+    console.print(f"[red]      - Alert Line: {line_num}")
+    console.print(f"[red]      - Evidence: {evidence}")
+    console.print(f"[red]      - Full Log Entry: {json.dumps(full_log_dict)}")
+    console.print("[red]="*60)
 
 def analyze_race_condition_dirty_cow(log_path, time_window_seconds=2, madvise_thresh=5, write_thresh=5):
     found = False
@@ -36,7 +40,12 @@ def analyze_race_condition_dirty_cow(log_path, time_window_seconds=2, madvise_th
 
             except json.JSONDecodeError:
                 continue
-    if not found: print("No specific threats detected.")
+    if not found: console.print("[blue]No specific threats detected.")
+
+def main():
+    print("--- Starting Race Condition Analysis... ---")
+    analyze_race_condition_dirty_cow(sys.argv[1] if len(sys.argv) > 1 else "log.jsonl")
+    print("--- Race Condition Analysis Completed ---\n")
 
 if __name__ == '__main__':
-    analyze_race_condition_dirty_cow("race_condition_dirty_cow_trace.jsonl")
+    main()
