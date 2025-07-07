@@ -128,25 +128,14 @@
 
 😍**Pay attention! This part will refresh each seconds. 但是也要在这一秒内有内存的申请或归还才会输出，及都为0的情况不会每秒刷新。如果你需要更改刷新的频率或者逻辑，可以联系我**
 
-- FREE_SUM 统计调用次数
-
-  ```json
-  {"ts":<timestamp>,"pid":-1,"evt":"FREE_SUM","meta":{"count":<free_count>}}
-  ```
-
 - MMAP_SUM：统计调用次数及最大页面数。
 
   ```json
   {"ts":<timestamp>,"pid":-1,"evt":"MMAP_SUM","meta":{"count":<mmap_count>,"max_pages":<max_pages>}}
   ```
 
-- ALLOC_SUM：统计 malloc  calloc、realloc调用次数。
+- 如果对逻辑不确定，详见附录
 
-  ```json
-  {"ts":<timestamp>,"pid":-1,"evt":"ALLOC_SUM","meta":{"count":<alloc_count>}}
-  ```
-
-如果对逻辑不确定，详见附录
 
 ### 3.5 调度与信号
 
@@ -253,12 +242,6 @@
 ```bash
 interval:s:1
 {
-    /* FREE_SUM */
-    if (@free_cnt) {
-        printf("{\"ts\":%llu,\"pid\":-1,\"evt\":\"FREE_SUM\",\"meta\":{\"count\":%llu}}\n",
-               nsecs/1000000000ULL, @free_cnt);
-    }
-    clear(@free_cnt);
 
     /* MMAP_SUM */
     if (@mmap_total) {
@@ -268,12 +251,7 @@ interval:s:1
     clear(@mmap_total);
     clear(@mmap_max);
 
-    /* ALLOC_SUM */
-    if (@alloc_cnt) {
-       printf("{\"ts\":%llu,\"pid\":-1,\"evt\":\"ALLOC_SUM\",\"meta\":{\"count\":%llu}}\n",
-       nsecs/1000000000ULL, @alloc_cnt);
-    }
-    clear(@alloc_cnt);
+
 }
 ```
 
