@@ -162,10 +162,6 @@
   {"ts":<timestamp>,"event":"SIGNAL_GENERATE","pid":<pid>,"sig":<signal_number>}
   ```
 
-已思考 5 秒
-
-下面是新增的三种系统调用事件的 JSON 接口说明，直接补充到你的整体接口文档中即可。
-
 ------
 
 ### 3.6 SETUID
