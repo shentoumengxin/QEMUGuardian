@@ -1,13 +1,17 @@
 import json
+import sys
+from rich.console import Console
+
+console = Console()
 
 def print_alert(severity, alert_type, line_num, evidence, full_log_dict, pid):
-    print("\n" + "="*60)
-    print(f"[!!!] {severity} Alert: Potential [{alert_type}] vulnerability detected!")
-    print(f"      - Process ID: {pid}")
-    print(f"      - Alert Line: {line_num}")
-    print(f"      - Evidence: {evidence}")
-    print(f"      - Full Log Entry: {json.dumps(full_log_dict)}")
-    print("="*60)
+    console.print("[red]\n" + "="*60)
+    console.print(f"[red][!!!] [green]{severity}[/green] Alert: Potential [green][{alert_type}][/green] vulnerability detected!")
+    console.print(f"[red]      - Process ID: [green]{pid}")
+    console.print(f"[red]      - Alert Line: [green]{line_num}")
+    console.print(f"[red]      - Evidence: {evidence}")
+    console.print(f"[red]      - Full Log Entry: {json.dumps(full_log_dict)}")
+    console.print("[red]="*60)
 
 def analyze_fork_bomb(log_path, time_window_seconds=2, fork_threshold=50):
     found = False
@@ -35,7 +39,12 @@ def analyze_fork_bomb(log_path, time_window_seconds=2, fork_threshold=50):
 
             except (json.JSONDecodeError, TypeError):
                 continue
-    if not found: print("No specific threats detected.")
+    if not found: console.print("[blue]No specific threats detected.")
+
+def main():
+    print("--- Starting Fork Bomb Analysis... ---")
+    analyze_fork_bomb(sys.argv[1] if len(sys.argv) > 1 else "log.jsonl")
+    print("--- Fork Bomb Analysis Completed ---\n")
 
 if __name__ == '__main__':
-    analyze_fork_bomb("fork_bomb_trace.jsonl")
+    main()
