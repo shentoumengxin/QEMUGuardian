@@ -14,17 +14,25 @@ HIGH_VULNERABILITY_THRESHOLD = 8
 
 # Map event types to analyzer scripts
 EVENT_ANALYZER_MAP = {
-    "EXEC": [
-        "./analyzers/code_injection_analyzer.py",
-        "./analyzers/exec_analyzer.py"  # Added second analyzer for EXEC
-    ],
-    "SOCKET": ["./analyzers/network_analyzer.py"],
-    "READ": [
-        "./analyzers/file_access_analyzer.py",
-        "./analyzers/data_leak_analyzer.py"  # Added second analyzer for READ
-    ],
-    "WRITE": ["./analyzers/file_access_analyzer.py"]
+    "EXEC": ["./analyzers/CodeInjection.py"],
+    "SETUID": ["./analyzers/AccessControl.py"],
+    "SETGID": ["./analyzers/AccessControl.py"],
+    "SETREUID": ["./analyzers/AccessControl.py"],
+    "SETRESUID": ["./analyzers/AccessControl.py"],
+    "TRACK_OPENAT": ["./analyzers/AccessControl.py"],
+    "TRACK_FORK": ["./analyzers/ForkBomb.py"],
+    "READ": ["./analyzers/InformationLeakage.py"],
+    "WRITE": [
+        "./analyzers/InformationLeakage.py",
+        "./analyzers/RaceCondition.py"],
+    "RECVFROM": ["./analyzers/InformationLeakage.py"],
+    "SENDTO": ["./analyzers/InformationLeakage.py"],
+    "MPROTECT": ["./analyzers/MemoryCorruption.py"],
+    "MADVISE": ["./analyzers/RaceCondition.py"]
+}
 
+EVT_ANALYZER_MAP = {
+    "MMAP_SUM": ["./analyzers/MemoryCorruption.py"],
 }
 
 def run_analyzer(analyzer_script, data):
@@ -134,7 +142,9 @@ def main():
                                 print(f"Processing JSON event: {data}")
                                 if data:
                                     event_type = data.get("event")
+                                    evt_type = data.get("evt")
                                     target_analyzers = EVENT_ANALYZER_MAP.get(event_type, [])
+                                    target_analyzers += EVT_ANALYZER_MAP.get(evt_type, [])
                                     if not target_analyzers:
                                         continue
                                     futures = [executor.submit(run_analyzer, script, data) 
