@@ -6,11 +6,17 @@ import argparse
 import signal
 from concurrent.futures import ThreadPoolExecutor
 import re
+from collections import deque
+
+
+seen_pids = set()       # 只追加不弹出，保留整个监控周期内见过的 PID
+hidden_failures = set()    # 记录那些 kill 失败的高危 PID
+
 # Analyzer folder path
 ANALYZER_DIR = "./analyzers"
 
 # Vulnerability level threshold (e.g., >= 8 is high-risk)
-HIGH_VULNERABILITY_THRESHOLD = 8
+HIGH_VULNERABILITY_THRESHOLD = 5
 
 # Map event types to analyzer scripts
 EVENT_ANALYZER_MAP = {
@@ -59,14 +65,49 @@ def run_analyzer(analyzer_script, data):
         return {"level": -1, "description": f"Analyzer {analyzer_script} timed out", "analyzer": analyzer_script}
     except Exception as e:
         return {"level": -1, "description": f"Error: {str(e)}", "analyzer": analyzer_script}
+def safe_terminate(pid, report_lines):
+    """
+    Try to terminate the given PID (and its process group).  
+    Append status messages into report_lines.
+    """
+    # 1) Check existence by sending signal 0
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        report_lines.append(f"Process {pid} no longer exists; skipping.")
+        hidden_failures.add(pid)
+        return False
+
+    # 2) Attempt to kill entire process group
+    try:
+        pgid = os.getpgid(pid)
+        os.killpg(pgid, signal.SIGTERM)
+        report_lines.append(f"Sent SIGTERM to process group {pgid} (PID {pid}).")
+        return True
+    except ProcessLookupError:
+        report_lines.append(f"Could not get pgid for PID {pid}; it may be hidden.")
+        hidden_failures.add(pid)
+        return False
+    except PermissionError as e:
+        report_lines.append(f"Permission denied killing PID {pid}: {e}")
+        hidden_failures.add(pid)
+        return False
+    except Exception:
+        # Fallback: record failure
+        report_lines.append(f"Unknown error terminating PID {pid}.")
+        hidden_failures.add(pid)
+        return False
 
 def generate_report(results):
     """Generate a report and handle high-risk vulnerabilities."""
+    valid = [r for r in (results or []) if r is not None]
+    # 如果过滤后列表空，就直接返回，不打印任何东西
+    if not valid:
+        return
     report = ["Vulnerability Report"]
-    report.append("-" * 20)
+    report.append("-" * 50)
     
     high_risk_pids = []
-    results = [r for r in results if r is not None]
     for result in results:
         level = result.get("level", 0)
         desc = result.get("description", "No description")
@@ -77,23 +118,19 @@ def generate_report(results):
         report.append(f"Description: {desc}")
         if pid:
             report.append(f"PID: {pid}")
-        report.append("-" * 20)
+        report.append("-" * 50)
         
-        if level >= HIGH_VULNERABILITY_THRESHOLD and pid:
+        if level >= HIGH_VULNERABILITY_THRESHOLD and pid>0:
             high_risk_pids.append(pid)
     
     for pid in high_risk_pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-            report.append(f"Terminated high-risk process PID: {pid}")
-        except Exception as e:
-            report.append(f"Failed to terminate PID: {pid} - {str(e)}")
-    
+        safe_terminate(pid, report)
+
     return "\n".join(report)
 
 def main():
 
-
+    isolation_asked = False
     monitor_process = subprocess.Popen(
         ['bpftrace', 'monitor.bt'],
         stdout=subprocess.PIPE,
@@ -139,8 +176,11 @@ def main():
                             # 下面走原先的 JSON 解析和分发逻辑
                             try:
                                 data = json.loads(line)
-                                print(f"Processing JSON event: {data}")
+                               # print(f"Processing JSON event: {data}")
                                 if data:
+                                    pid = data.get("pid")
+                                    if pid:
+                                        seen_pids.add(pid)
                                     event_type = data.get("event")
                                     evt_type = data.get("evt")
                                     target_analyzers = EVENT_ANALYZER_MAP.get(event_type, [])
@@ -150,9 +190,32 @@ def main():
                                     futures = [executor.submit(run_analyzer, script, data) 
                                             for script in target_analyzers]
                                     results = [future.result() for future in futures]
+                                    if( not results):
+                                        continue
                                     report = generate_report(results)
+                                    if not report:
+                                        continue
                                     print(report)
                                     print("=" * 50)
+                                    # If any hidden failures happened, alert the user
+                                    if hidden_failures and not isolation_asked:
+                                        print(f"\nWARNING: could not terminate PIDs: "
+                                            f"{', '.join(map(str, hidden_failures))}")
+                                        confirm = input("Perform full isolation of all seen PIDs? [y/N]: ")
+                                        if confirm.strip().lower() == 'y':
+                                            for p in set(seen_pids):
+                                                try:
+                                                    pg = os.getpgid(p)
+                                                    os.killpg(pg, signal.SIGTERM)
+                                                    print(f"Isolated pgid {pg} (PID {p})")
+                                                except Exception as e:
+                                                    print(f"Failed isolate PID {p}: {e}")
+                                            seen_pids.clear()
+                                            hidden_failures.clear()
+                                        else:
+                                            print("Skipping full isolation.")
+                                            hidden_failures.clear()
+                                        isolation_asked = True
                             except json.JSONDecodeError as e:
                                 print(f"Dropping invalid JSON: {line} (Error: {str(e)})")
                                 continue  # Drop the invalid JSON line
