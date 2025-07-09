@@ -16,7 +16,8 @@ def analyze_access_control():
 
             if event in PRIVILEGE_ESCALATION_EVENTS and log.get('uid') == 0:
                 results = {
-                    "level": 8,
+                    "level": 9.3,
+                    "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:H/SI:H/SA:H",
                     "description": "Potential Privilege Escalation",
                     "pid": pid,
                     "evidence": f"'{event}' call attempts to set uid to 0 (root)",
@@ -27,7 +28,8 @@ def analyze_access_control():
                 filename = log.get('file', '')
                 if '../' in filename:
                     results = {
-                        "level": 5,
+                        "level": 7.7,
+                        "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
                         "description": "Potential Path Traversal",
                         "pid": pid,
                         "evidence": "Path contains '../' sequence",
@@ -35,8 +37,9 @@ def analyze_access_control():
                     print(json.dumps(results))
                 if filename in SENSITIVE_FILES:
                     results = {
-                        "level": 8,
-                        "description": "Sensitive File Access",
+                        "level": 7.7,
+                        "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
+                        "description": "Access to Sensitive File",
                         "pid": pid,
                         "evidence": f"Attempt to access sensitive file: {filename}",
                     }

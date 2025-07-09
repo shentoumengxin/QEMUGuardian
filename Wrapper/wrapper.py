@@ -20,7 +20,8 @@ HIGH_VULNERABILITY_THRESHOLD = 5
 
 # Map event types to analyzer scripts
 EVENT_ANALYZER_MAP = {
-    "EXEC": ["./analyzers/CodeInjection.py"],
+    "EXEC": ["./analyzers/CodeInjection.py", "./analyzers/FilelessExecution.py"],
+    # "EXEC": ["./analyzers/CodeInjection.py"],
     "SETUID": ["./analyzers/AccessControl.py"],
     "SETGID": ["./analyzers/AccessControl.py"],
     "SETREUID": ["./analyzers/AccessControl.py"],
@@ -34,7 +35,11 @@ EVENT_ANALYZER_MAP = {
     "RECVFROM": ["./analyzers/InformationLeakage.py"],
     "SENDTO": ["./analyzers/InformationLeakage.py"],
     "MPROTECT": ["./analyzers/MemoryCorruption.py"],
-    "MADVISE": ["./analyzers/RaceCondition.py"]
+    "MADVISE": ["./analyzers/RaceCondition.py"],
+    "CONNECT": ["./analyzers/ReverseShell.py"],
+    "SIGNAL_GENERATE": ["./analyzers/AbnormalSignalHandling.py"],
+    "READLINKAT": ["./analyzers/Reconnaissance.py"],
+    "DUP2": ["./analyzers/ReverseShell.py"]
 }
 
 EVT_ANALYZER_MAP = {
@@ -109,15 +114,21 @@ def generate_report(results):
     
     high_risk_pids = []
     for result in results:
+        if not result:
+            continue
         level = result.get("level", 0)
+        cvss_vector = result.get("cvss_vector", "Unknown")
         desc = result.get("description", "No description")
         analyzer = result.get("analyzer", "Unknown")
         pid = result.get("pid")
+        evidence = result.get("evidence", "No evidence")
         report.append(f"Analyzer: {analyzer}")
         report.append(f"Level: {level}")
+        report.append(f"CVSS Vector: {cvss_vector}")
         report.append(f"Description: {desc}")
         if pid:
             report.append(f"PID: {pid}")
+        report.append(f"Evidence: {evidence}")
         report.append("-" * 50)
         
         if level >= HIGH_VULNERABILITY_THRESHOLD and pid>0:
@@ -131,6 +142,7 @@ def generate_report(results):
 def main():
 
     isolation_asked = False
+    os.system("python3 initial.py") 
     monitor_process = subprocess.Popen(
         ['bpftrace', 'monitor.bt'],
         stdout=subprocess.PIPE,
@@ -176,7 +188,7 @@ def main():
                             # 下面走原先的 JSON 解析和分发逻辑
                             try:
                                 data = json.loads(line)
-                               # print(f"Processing JSON event: {data}")
+                                # print(f"Processing JSON event: {data}")
                                 if data:
                                     pid = data.get("pid")
                                     if pid:
@@ -184,6 +196,9 @@ def main():
                                     event_type = data.get("event")
                                     evt_type = data.get("evt")
                                     target_analyzers = EVENT_ANALYZER_MAP.get(event_type, [])
+                                    # if not target_analyzers:
+                                    #     target_analyzers = EVT_ANALYZER_MAP.get(evt_type, [])
+                                        # target_analyzers = []
                                     target_analyzers += EVT_ANALYZER_MAP.get(evt_type, [])
                                     if not target_analyzers:
                                         continue

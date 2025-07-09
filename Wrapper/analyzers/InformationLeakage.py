@@ -1,14 +1,50 @@
 import json
 import sys
+import os
 from collections import deque
 
+# 状态文件的路径
+STATE_FILE = '/tmp/information_leakage.state.json'
+WINDOW_SIZE = 10  # 保持窗口大小一致
+
+def load_state():
+    """从文件加载状态。"""
+    if not os.path.exists(STATE_FILE):
+        return {
+            'recvs': deque(maxlen=WINDOW_SIZE),
+            'reads': deque(maxlen=WINDOW_SIZE)
+        }
+    try:
+        with open(STATE_FILE, 'r') as f:
+            data = json.load(f)
+            # 从list恢复deque
+            return {
+                'recvs': deque(data.get('recvs', []), maxlen=WINDOW_SIZE),
+                'reads': deque(data.get('reads', []), maxlen=WINDOW_SIZE)
+            }
+    except (json.JSONDecodeError, IOError):
+        return {
+            'recvs': deque(maxlen=WINDOW_SIZE),
+            'reads': deque(maxlen=WINDOW_SIZE)
+        }
+
+def save_state(recvs, reads):
+    """将当前状态保存到文件。"""
+    with open(STATE_FILE, 'w') as f:
+        # 将deque转为list以便JSON序列化
+        serializable_state = {
+            'recvs': list(recvs),
+            'reads': list(reads)
+        }
+        json.dump(serializable_state, f)
+
 def analyze_info_leak():
-    window_size = 10
     factor = 10
     threshold = 16
 
-    recent_recvs = deque(maxlen=window_size)
-    recent_reads = deque(maxlen=window_size)
+    state = load_state()
+    recent_recvs = state['recvs']
+    recent_reads = state['reads']
 
     for line in sys.stdin:
         line = line.strip()
@@ -26,7 +62,9 @@ def analyze_info_leak():
                 if send_len > threshold:
                     for recv_info in reversed(recent_recvs):
                         if send_len > recv_info['size'] * factor:
-                            results = {                                "level": 8,
+                            results = {                                
+                                "level": 7.1,
+                                "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
                                 "description": "High Risk: Network Information Leak",
                                 "pid": pid,
                                 "evidence": f"Large send (len={send_len}) on this line, following small receive (size={recv_info['size']}) on line {recv_info['line_num']}",
@@ -43,7 +81,8 @@ def analyze_info_leak():
                     for read_info in reversed(recent_reads):
                         if write_size > read_info['size'] * factor:
                             results = {
-                                "level": 8,
+                                "level": 7.1,
+                                "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
                                 "description": "High Risk: File I/O Information Leak",
                                 "pid": pid,
                                 "evidence": f"Large write (size={write_size}) on this line, following small read (size={read_info['size']}) on line {read_info['line_num']}",
@@ -57,6 +96,8 @@ def analyze_info_leak():
                 "pid": None,
             }
             print(json.dumps(results))
+
+        save_state(recent_recvs, recent_reads)
 
 if __name__ == '__main__':
     analyze_info_leak()

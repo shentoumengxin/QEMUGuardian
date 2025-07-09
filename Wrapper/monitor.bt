@@ -1,8 +1,8 @@
 #!/usr/bin/env bpftrace
-BEGIN {
+// BEGIN {
     // Start monitoring event
-    printf("{\"ts\":%llu,\"event\": \"START\", \"message\": \"Dynamic QEMU-user monitor started\"}\n",nsecs/1000000000ULL);
-}
+//     printf("{\"ts\":%llu,\"event\": \"START\", \"message\": \"Dynamic QEMU-user monitor started\"}\n",nsecs/1000000000ULL);
+// }
 
 // (1) When a process with name starting "qemu-" calls openat, add its PID to monitored list
 tracepoint:syscalls:sys_enter_openat 
@@ -202,7 +202,7 @@ tracepoint:signal:signal_generate
            args->pid, args->sig);
 }
 
-END {
+// END {
     // End monitoring event
-    printf("{\"ts\":%llu,\"event\": \"END\", \"message\": \"Dynamic QEMU-user monitor stopped\"}\n",nsecs/1000000000ULL);
-}
+//     printf("{\"ts\":%llu,\"event\": \"END\", \"message\": \"Dynamic QEMU-user monitor stopped\"}\n",nsecs/1000000000ULL);
+// }
