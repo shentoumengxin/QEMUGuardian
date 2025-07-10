@@ -598,3 +598,270 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# #!/usr/bin/env python3
+# import subprocess
+# import json
+# import os
+# import signal
+# import re
+# import threading
+# import queue
+# import time
+# import logging
+# from datetime import datetime
+# import tkinter as tk
+# from tkinter.scrolledtext import ScrolledText
+# from concurrent.futures import ThreadPoolExecutor
+
+# # --- 1. 日志和队列设置 ---
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s\n%(message)s\n',
+#     filename='vulnerability_monitor.log',
+#     filemode='a'
+# )
+# # 这个队列用于在后台监控线程和主GUI线程之间安全地传递分析结果
+# results_queue = queue.Queue()
+
+# # --- 2. 全局变量和配置 ---
+# STATEFUL_ANALYZERS = [
+#     "./analyzers/ForkBomb.py",
+#     "./analyzers/InformationLeakage.py",
+#     "./analyzers/ReverseShell.py"
+# ]
+# STATELESS_EVENT_ANALYZER_MAP = {
+#     "EXEC": ["./analyzers/CodeInjection.py", "./analyzers/FilelessExecution.py"],
+#     "SETUID": ["./analyzers/AccessControl.py"],
+#     "SETGID": ["./analyzers/AccessControl.py"],
+#     "SETREUID": ["./analyzers/AccessControl.py"],
+#     "SETRESUID": ["./analyzers/AccessControl.py"],
+#     "TRACK_OPENAT": ["./analyzers/AccessControl.py"],
+#     "MPROTECT": ["./analyzers/MemoryCorruption.py"],
+#     "SIGNAL_GENERATE": ["./analyzers/AbnormalSignalHandling.py"],
+# }
+# STATELESS_EVT_ANALYZER_MAP = {
+#     "MMAP_SUM": ["./analyzers/MemoryCorruption.py"]
+# }
+# HIGH_VULNERABILITY_THRESHOLD = 5.0
+# hidden_failures = set()
+
+# # --- 3. GUI弹窗类 (运行在主线程) ---
+# class ReportWindow:
+#     def __init__(self, root):
+#         self.root = root
+#         self.root.title("实时漏洞警报")
+#         self.root.geometry("800x600")
+        
+#         self.text_area = ScrolledText(root, wrap=tk.WORD, bg="#1e1e1e", fg="#d4d4d4", font=("Consolas", 10))
+#         self.text_area.pack(expand=True, fill='both')
+        
+#         # 定义报告格式的标签
+#         self.text_area.tag_config("title", foreground="#569cd6", font=("Consolas", 12, "bold"))
+#         self.text_area.tag_config("high_risk_title", foreground="#f44747", font=("Consolas", 12, "bold"))
+#         self.text_area.tag_config("header", foreground="#9cdcfe", font=("Consolas", 10, "bold"))
+#         self.text_area.tag_config("value", foreground="#d4d4d4")
+#         self.text_area.tag_config("action_ok", foreground="#4ec9b0") # 绿色
+#         self.text_area.tag_config("action_fail", foreground="#ce9178") # 橙色
+#         self.text_area.tag_config("separator", foreground="#858585")
+
+#         self.text_area.configure(state='disabled')
+#         self.process_incoming_results()
+
+#     def process_incoming_results(self):
+#         """周期性地检查结果队列，并处理所有待处理的结果"""
+#         while not results_queue.empty():
+#             try:
+#                 result = results_queue.get_nowait()
+#                 self.generate_and_display_report(result)
+#             except queue.Empty:
+#                 pass
+#         self.root.after(200, self.process_incoming_results)
+
+#     def safe_terminate(self, pid):
+#         """
+#         尝试终止给定的PID及其进程组。
+#         返回一个元组: (success: bool, message: str)
+#         """
+#         try:
+#             pgid = os.getpgid(pid)
+#             os.killpg(pgid, signal.SIGTERM)
+#             return (True, f"ACTION:      Sent SIGTERM to process group {pgid} (PID {pid})")
+#         except ProcessLookupError:
+#             hidden_failures.add(pid)
+#             return (False, f"ACTION FAILED: Could not get pgid for PID {pid}; process may have already exited.")
+#         except PermissionError as e:
+#             hidden_failures.add(pid)
+#             return (False, f"ACTION FAILED: Permission denied killing PID {pid}: {e}")
+#         except Exception as e:
+#             hidden_failures.add(pid)
+#             return (False, f"ACTION FAILED: Unknown error terminating PID {pid}: {e}")
+
+#     def generate_and_display_report(self, result):
+#         """格式化报告，终止进程，记录日志，并更新GUI"""
+#         if not isinstance(result, dict):
+#             return
+        
+#         # 1. 提取数据
+#         cvss_info = result.get("cvss_4_0", {})
+#         score = result.get("level", 0.0)
+#         desc = result.get("description", "No description")
+#         analyzer = result.get("analyzer", "Unknown")
+#         pid = result.get("pid")
+#         evidence = result.get("evidence", "N/A")
+#         cvss_vector = result.get("vector", "N/A")
+
+#         # 2. 为日志文件构建纯文本报告
+#         report_lines_for_log = [
+#             "Vulnerability Report", "="*50,
+#             f"Analyzer:    {analyzer}", f"Description: {desc}", f"CVSS Score:  {score}",
+#             f"CVSS Vector: {cvss_vector}", f"PID:         {pid if pid else 'N/A'}",
+#             f"Evidence:    {evidence}"
+#         ]
+        
+#         action_success = None
+#         action_message = ""
+#         if pid and pid > 0 and score >= HIGH_VULNERABILITY_THRESHOLD:
+#             action_success, action_message = self.safe_terminate(pid)
+#             report_lines_for_log.append(action_message)
+
+#         report_lines_for_log.append("-" * 50)
+#         final_report_for_log = "\n".join(report_lines_for_log)
+#         logging.info(final_report_for_log)
+
+#         # 3. 将格式化后的报告添加到GUI
+#         self.text_area.configure(state='normal')
+        
+#         title_tag = "high_risk_title" if score >= 7.0 else "title"
+#         self.text_area.insert(tk.END, "Vulnerability Report\n", title_tag)
+#         self.text_area.insert(tk.END, "="*80 + "\n", "separator")
+
+#         self.text_area.insert(tk.END, f"{'Analyzer:':<12}", "header")
+#         self.text_area.insert(tk.END, f"{analyzer}\n", "value")
+#         self.text_area.insert(tk.END, f"{'Description:':<12}", "header")
+#         self.text_area.insert(tk.END, f"{desc}\n", "value")
+#         self.text_area.insert(tk.END, f"{'CVSS Score:':<12}", "header")
+#         self.text_area.insert(tk.END, f"{score}\n", "value")
+#         self.text_area.insert(tk.END, f"{'CVSS Vector:':<12}", "header")
+#         self.text_area.insert(tk.END, f"{cvss_vector}\n", "value")
+#         self.text_area.insert(tk.END, f"{'PID:':<12}", "header")
+#         self.text_area.insert(tk.END, f"{pid if pid else 'N/A'}\n", "value")
+#         self.text_area.insert(tk.END, f"{'Evidence:':<12}", "header")
+#         self.text_area.insert(tk.END, f"{evidence}\n", "value")
+
+#         if action_message:
+#             action_tag = "action_ok" if action_success else "action_fail"
+#             self.text_area.insert(tk.END, f"{action_message}\n", action_tag)
+
+#         self.text_area.insert(tk.END, "-"*80 + "\n\n", "separator")
+        
+#         self.text_area.configure(state='disabled')
+#         self.text_area.see(tk.END)
+
+# # --- 4. 后台监控线程函数 ---
+# def run_stateless_analyzer(analyzer_script, data):
+#     try:
+#         result = subprocess.run(['python3', analyzer_script], input=json.dumps(data), text=True, capture_output=True, timeout=10)
+#         output = result.stdout.strip()
+#         if output:
+#             result_dict = json.loads(output)
+#             result_dict["analyzer"] = analyzer_script
+#             results_queue.put(result_dict)
+#     except Exception: pass
+
+# def read_analyzer_output(proc):
+#     for line in iter(proc.stdout.readline, ''):
+#         try:
+#             result = json.loads(line)
+#             result["analyzer"] = proc.args[1]
+#             results_queue.put(result)
+#         except json.JSONDecodeError: pass
+
+# def start_monitoring_threads(stateful_procs, stateless_executor):
+#     """启动所有后台监控线程"""
+#     command = ['sudo', 'stdbuf', '-o0', 'bpftrace', 'monitor.bt']
+#     monitor_process = subprocess.Popen(
+#         command,
+#         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace'
+#     )
+
+#     CONTROL_CHAR_RGX = re.compile(r'[\x00-\x1f]+')
+#     buffer = ""
+#     brace_count = 0
+    
+#     for raw_line in iter(monitor_process.stdout.readline, ''):
+#         for ch in raw_line:
+#             if ch == "{":
+#                 if brace_count == 0: buffer = ""
+#                 brace_count += 1
+#             if brace_count > 0: buffer += ch
+#             if ch == "}":
+#                 brace_count -= 1
+#                 if brace_count == 0:
+#                     line = CONTROL_CHAR_RGX.sub('', buffer.strip())
+#                     try:
+#                         data = json.loads(line)
+#                         json_line = json.dumps(data) + '\n'
+#                         for proc in stateful_procs:
+#                             if not proc.stdin.closed:
+#                                 try:
+#                                     proc.stdin.write(json_line)
+#                                     proc.stdin.flush()
+#                                 except BrokenPipeError: pass
+#                         event_type = data.get("event")
+#                         evt_type = data.get("evt")
+#                         target_analyzers = STATELESS_EVENT_ANALYZER_MAP.get(event_type, [])
+#                         target_analyzers += STATELESS_EVT_ANALYZER_MAP.get(evt_type, [])
+#                         for script in target_analyzers:
+#                             stateless_executor.submit(run_stateless_analyzer, script, data)
+#                     except json.JSONDecodeError: pass
+
+# # --- 5. 主程序入口 ---
+# def main():
+#     # 启动有状态分析器进程
+#     stateful_procs = []
+#     for script in STATEFUL_ANALYZERS:
+#         proc = subprocess.Popen(['python3', script], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8')
+#         stateful_procs.append(proc)
+    
+#     # 创建无状态分析器的线程池
+#     stateless_executor = ThreadPoolExecutor(max_workers=10)
+
+#     # 启动所有后台读取线程
+#     for proc in stateful_procs:
+#         thread = threading.Thread(target=read_analyzer_output, args=(proc,), daemon=True)
+#         thread.start()
+        
+#     # 启动主监控线程
+#     monitor_thread = threading.Thread(target=start_monitoring_threads, args=(stateful_procs, stateless_executor), daemon=True)
+#     monitor_thread.start()
+
+#     print("监控程序已在后台启动。")
+#     print("实时警报将显示在弹窗中并记录到 vulnerability_monitor.log。")
+
+#     # 在主线程中创建并运行GUI
+#     root = tk.Tk()
+#     app = ReportWindow(root)
+    
+#     # 设置一个协议，以便在用户点击关闭按钮时能优雅地退出
+#     def on_closing():
+#         print("\n窗口关闭，正在清理所有后台进程...")
+#         # 清理所有进程
+#         for proc in stateful_procs:
+#             if proc.poll() is None: proc.terminate()
+#         stateless_executor.shutdown(wait=False, cancel_futures=True)
+#         # 查找并终止bpftrace进程
+#         # 注意：这需要ps和grep命令，在Linux上通常可用
+#         try:
+#             p1 = subprocess.Popen(['pgrep', '-f', 'bpftrace monitor.bt'], stdout=subprocess.PIPE)
+#             out, _ = p1.communicate()
+#             for pid in out.decode().split():
+#                 os.kill(int(pid), signal.SIGTERM)
+#         except Exception: pass
+#         root.destroy()
+
+#     root.protocol("WM_DELETE_WINDOW", on_closing)
+#     root.mainloop()
+
+# if __name__ == "__main__":
+#     main()
