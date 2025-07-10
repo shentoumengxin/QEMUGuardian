@@ -45,7 +45,7 @@ def analyze_reverse_shell():
                 if newfd in {0, 1, 2}:
                     oldfd = log.get('oldfd')
                     result = {
-                        "level": 9.8,
+                        "level": 9.4,
                         "cvss_vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
                         "description": "Potential Reverse Shell Detected",
                         "pid": pid,

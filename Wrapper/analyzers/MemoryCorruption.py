@@ -16,7 +16,7 @@ def analyze_memory_corruption():
         if log.get('event') == 'MPROTECT':
             if log.get('exec') == 1:
                 results = {
-                    "level": 10.0,
+                    "level": 9.3,
                     "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
                     "description": "Memory Corruption (Shellcode)",
                     "pid": pid,

@@ -17,7 +17,7 @@ def analyze_access_control():
 
         if event in PRIVILEGE_ESCALATION_EVENTS and log.get('uid') == 0:
             results = {
-                "level": 9.3,
+                "level": 6.3,
                 "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:H/SI:H/SA:H",
                 "description": "Potential Privilege Escalation",
                 "pid": pid,

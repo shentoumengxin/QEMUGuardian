@@ -58,7 +58,7 @@ def analyze_fork_bomb():
                 
             if current_count > fork_threshold and window_key not in alerted_windows:
                 results = {
-                    "level": 8.5,
+                    "level": 8.2,
                     "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:H",
                     "description": "High Risk: Resource Exhaustion (Fork Bomb)",
                     "pid": pid,

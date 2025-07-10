@@ -68,7 +68,7 @@ def analyze_abnormal_signal_handling():
 
                 if count >= signal_threshold:
                     result = {
-                        "level": 5.8,
+                        "level": 2.0,
                         "cvss_vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
                         "description": "Abnormal Signal Handling Detected",
                         "pid": pid,
