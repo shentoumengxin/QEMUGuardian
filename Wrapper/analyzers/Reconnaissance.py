@@ -21,7 +21,7 @@ def analyze_reconnaissance():
 
             if path in RECON_PATHS:
                 result = {
-                    "level": 3.4,
+                    "level": 4.8,
                     "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
                     "description": "Suspicious Reconnaissance Activity Detected",
                     "pid": pid,

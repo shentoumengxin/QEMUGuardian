@@ -19,7 +19,7 @@ def analyze_fileless_execution():
             if PROC_FD_PATH_RE.match(filename):
                 pid = log.get('pid')
                 result = {
-                    "level": 10.0,
+                    "level": 9.3,
                     "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
                     "description": "Potential Fileless Execution Detected",
                     "pid": pid,

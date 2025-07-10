@@ -2,8 +2,7 @@
 #include <unistd.h>
 
 int main() {
-    // while(1) {
-    for( int i = 0; i < 500; i++) {
+    while(1) {
         fork();
     }
     return 0;

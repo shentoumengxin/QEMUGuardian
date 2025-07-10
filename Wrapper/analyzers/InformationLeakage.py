@@ -64,7 +64,7 @@ def analyze_info_leak():
                 for recv_info in reversed(recent_recvs):
                     if send_len > recv_info['size'] * factor:
                         results = {                                
-                            "level": 7.1,
+                            "level": 6.9,
                             "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
                             "description": "High Risk: Network Information Leak",
                             "pid": pid,

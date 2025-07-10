@@ -70,7 +70,7 @@ def analyze_race_condition_dirty_cow():
            window_key not in alerted_windows:
                 
             result = {
-                    "level": 8.7,
+                    "level": 7.1,
                     "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:N/VC:N/VI:H/VA:N/SC:H/SI:H/SA:H",
                     "description": "Potential Race Condition (Dirty COW)",
                     "pid": pid,

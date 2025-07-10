@@ -1,2 +1,0 @@
-{"ts": 301, "event": "MPROTECT", "pid": 13609, "read": 0, "write": 0, "exec": 1}
-{"ts": 302, "pid": -1, "evt": "MMAP_SUM", "meta": {"count": 5, "max_pages": 2048}}

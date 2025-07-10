@@ -19,7 +19,7 @@ def analyze_command_injection():
         event = log.get('event')
         if event == 'EXEC' and filename in SUSPICIOUS_COMMANDS:
             result = {
-                "level": 10.0,
+                "level": 9.3,
                 "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
                 "description": "Potential Command Injection",
                 "pid": pid,
