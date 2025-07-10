@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S python3
+
 import subprocess
 import json
 import os
@@ -7,7 +8,7 @@ import signal
 from concurrent.futures import ThreadPoolExecutor
 import re
 from collections import deque
-
+import threading
 
 seen_pids = set()       # 只追加不弹出，保留整个监控周期内见过的 PID
 hidden_failures = set()    # 记录那些 kill 失败的高危 PID
@@ -70,15 +71,6 @@ def safe_terminate(pid, report_lines):
     Try to terminate the given PID (and its process group).  
     Append status messages into report_lines.
     """
-    # 1) Check existence by sending signal 0
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        report_lines.append(f"Process {pid} no longer exists; skipping.")
-        hidden_failures.add(pid)
-        return False
-
-    # 2) Attempt to kill entire process group
     try:
         pgid = os.getpgid(pid)
         os.killpg(pgid, signal.SIGTERM)
@@ -116,9 +108,21 @@ def generate_report(results):
         report.append(f"Analyzer: {analyzer}")
         report.append(f"Level: {level}")
         report.append(f"Description: {desc}")
-        if pid:
-            report.append(f"PID: {pid}")
-        report.append("-" * 50)
+        if pid and pid != 0:
+            try:
+                # 先检查进程是否存在
+                os.kill(pid, 0)
+                print(f"[DEBUG] Process {pid} exists")
+                pgid = os.getpgid(pid)
+                print(f"[DEBUG] Got PGID {pgid} for PID {pid}")
+                seen_pids.add(pgid)
+                pid_to_pgid[pid] = pgid
+            except ProcessLookupError:
+                print(f"[DEBUG] Process {pid} not found")
+            except PermissionError as e:
+                print(f"[DEBUG] Permission denied for PID {pid}: {e}")
+            except Exception as e:
+                print(f"[DEBUG] Unexpected error for PID {pid}: {e}")
         
         if level >= HIGH_VULNERABILITY_THRESHOLD and pid>0:
             high_risk_pids.append(pid)
@@ -130,7 +134,8 @@ def generate_report(results):
 
 def main():
 
-    isolation_asked = False
+    ans = input("Enable auto-isolation of all seen PIDs on hidden failures? [y/N]: ")
+    auto_isolate = ans.strip().lower() == 'y'
     monitor_process = subprocess.Popen(
         ['bpftrace', 'monitor.bt'],
         stdout=subprocess.PIPE,
@@ -176,11 +181,36 @@ def main():
                             # 下面走原先的 JSON 解析和分发逻辑
                             try:
                                 data = json.loads(line)
-                               # print(f"Processing JSON event: {data}")
+                                print(f"Processing JSON event: {data}")
                                 if data:
                                     pid = data.get("pid")
+                                    pre_pid = data.get("prev_pid")
+                                    parent_pid = data.get("parent")
+                                    child_pid = data.get("child")
+                                    if parent_pid and parent_pid!=0:
+                                        try:
+                                            pp = os.getpgid(parent_pid)
+                                            seen_pids.add(pp)
+                                        except ProcessLookupError:
+                                            pass
+                                    if child_pid and child_pid!=0:
+                                        try:
+                                            cp = os.getpgid(child_pid)
+                                            seen_pids.add(cp)
+                                        except ProcessLookupError:
+                                            pass
+                                    if pre_pid and pre_pid!=0:
+                                        try:
+                                            ppg = os.getpgid(pre_pid)
+                                            seen_pids.add(ppg)
+                                        except ProcessLookupError:
+                                             pass
                                     if pid:
-                                        seen_pids.add(pid)
+                                        try:
+                                            pg = os.getpgid(pid)
+                                            seen_pids.add(pg)
+                                        except ProcessLookupError:
+                                            pass
                                     event_type = data.get("event")
                                     evt_type = data.get("evt")
                                     target_analyzers = EVENT_ANALYZER_MAP.get(event_type, [])
@@ -198,24 +228,21 @@ def main():
                                     print(report)
                                     print("=" * 50)
                                     # If any hidden failures happened, alert the user
-                                    if hidden_failures and not isolation_asked:
-                                        print(f"\nWARNING: could not terminate PIDs: "
-                                            f"{', '.join(map(str, hidden_failures))}")
-                                        confirm = input("Perform full isolation of all seen PIDs? [y/N]: ")
-                                        if confirm.strip().lower() == 'y':
-                                            for p in set(seen_pids):
+                                    #print(f"Seen PIDs: {seen_pids}")
+                                    if hidden_failures:
+                                        if auto_isolate:
+                                            print("Auto-isolation: terminating ALL seen PIDs.")
+                                            for p in list(seen_pids):
                                                 try:
-                                                    pg = os.getpgid(p)
-                                                    os.killpg(pg, signal.SIGTERM)
-                                                    print(f"Isolated pgid {pg} (PID {p})")
+                                                    pgid = os.getpgid(p)
+                                                    os.killpg(pgid, signal.SIGTERM)
+                                                    print(f"Terminated PGID {pgid} (PID {p})")
                                                 except Exception as e:
-                                                    print(f"Failed isolate PID {p}: {e}")
-                                            seen_pids.clear()
-                                            hidden_failures.clear()
+                                                    print(f"Error terminating PID {p}: {e}")
                                         else:
-                                            print("Skipping full isolation.")
-                                            hidden_failures.clear()
-                                        isolation_asked = True
+                                            print("Danger! Auto-isolation is off, but some PIDs could not be terminated")
+
+                                        hidden_failures.clear()
                             except json.JSONDecodeError as e:
                                 print(f"Dropping invalid JSON: {line} (Error: {str(e)})")
                                 continue  # Drop the invalid JSON line
