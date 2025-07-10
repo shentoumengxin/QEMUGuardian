@@ -3,12 +3,10 @@ import sys
 import os
 from collections import deque
 
-# 状态文件的路径
 STATE_FILE = '/tmp/information_leakage.state.json'
-WINDOW_SIZE = 10  # 保持窗口大小一致
+WINDOW_SIZE = 10  
 
 def load_state():
-    """从文件加载状态。"""
     if not os.path.exists(STATE_FILE):
         return {
             'recvs': deque(maxlen=WINDOW_SIZE),
@@ -17,7 +15,6 @@ def load_state():
     try:
         with open(STATE_FILE, 'r') as f:
             data = json.load(f)
-            # 从list恢复deque
             return {
                 'recvs': deque(data.get('recvs', []), maxlen=WINDOW_SIZE),
                 'reads': deque(data.get('reads', []), maxlen=WINDOW_SIZE)
@@ -29,9 +26,7 @@ def load_state():
         }
 
 def save_state(recvs, reads):
-    """将当前状态保存到文件。"""
     with open(STATE_FILE, 'w') as f:
-        # 将deque转为list以便JSON序列化
         serializable_state = {
             'recvs': list(recvs),
             'reads': list(reads)
@@ -47,10 +42,8 @@ def analyze_info_leak():
     recent_reads = state['reads']
 
     line = sys.stdin.read().strip()
-    # for line in sys.stdin:
     if not line:
         return
-        # continue
     try:
         log = json.loads(line)
         event = log.get('event')

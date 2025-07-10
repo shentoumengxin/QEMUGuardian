@@ -518,7 +518,7 @@ def main():
                            
                             try:
                                 data = json.loads(line)
-                                #print(f"Processing JSON event: {data}")
+                                # print(f"Processing JSON event: {data}")
                                 if data:
                                     pid = data.get("pid")
                                     pre_pid = data.get("prev_pid")

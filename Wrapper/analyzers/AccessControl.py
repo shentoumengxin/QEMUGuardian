@@ -5,10 +5,8 @@ PRIVILEGE_ESCALATION_EVENTS = {"SETUID", "SETGID", "SETREUID", "SETRESUID"}
 SENSITIVE_FILES = {"/etc/passwd", "/etc/shadow", "/etc/sudoers"}
 
 def analyze_access_control():
-    # for line in sys.stdin:
     line = sys.stdin.read().strip()
     if not line:
-        # continue
         return
     try:
         log = json.loads(line)

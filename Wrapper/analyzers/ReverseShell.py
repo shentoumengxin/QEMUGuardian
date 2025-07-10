@@ -19,7 +19,6 @@ def load_state():
         return defaultdict(lambda: {'connected': False})
 
 def save_state(state):
-    """将当前状态保存到文件。"""
     with open(STATE_FILE, 'w') as f:
         json.dump(dict(state), f)
 

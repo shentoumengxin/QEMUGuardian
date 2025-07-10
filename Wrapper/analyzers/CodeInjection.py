@@ -7,10 +7,8 @@ SUSPICIOUS_COMMANDS = {
 }
 
 def analyze_command_injection():
-    # for line in sys.stdin:
     line = sys.stdin.read().strip()
     if not line:
-        # continue
         return
     try:
         log = json.loads(line)

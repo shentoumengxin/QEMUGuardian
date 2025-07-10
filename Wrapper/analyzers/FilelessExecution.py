@@ -3,14 +3,12 @@ import json
 import sys
 import re
 
-# 匹配 /proc/self/fd/.. 或 /proc/<pid>/fd/.. 格式的路径
+#  /proc/self/fd/.. or /proc/<pid>/fd/.. 
 PROC_FD_PATH_RE = re.compile(r'/proc/(self|\d+)/fd/\d+')
 
 def analyze_fileless_execution():
-    # for line in sys.stdin:
     line = sys.stdin.read().strip()
     if not line:
-        # continue
         return
     try:
         log = json.loads(line)

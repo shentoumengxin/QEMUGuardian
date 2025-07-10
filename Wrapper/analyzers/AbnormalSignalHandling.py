@@ -3,14 +3,11 @@ import sys
 import os
 from collections import defaultdict
 
-# 状态文件的路径
 STATE_FILE = '/tmp/abnormal_signal.state.json'
 
-# 常见的致命/陷阱信号
 SUSPICIOUS_SIGNALS = {4, 5, 7, 8, 11} # SIGILL, SIGTRAP, SIGBUS, SIGFPE, SIGSEGV
 
 def load_state():
-    """从文件加载状态。"""
     if not os.path.exists(STATE_FILE):
         return {'counts': defaultdict(lambda: defaultdict(int)), 'alerted': set()}
     try:
@@ -26,7 +23,6 @@ def load_state():
         return {'counts': defaultdict(lambda: defaultdict(int)), 'alerted': set()}
 
 def save_state(counts, alerted):
-    """将当前状态保存到文件。"""
     with open(STATE_FILE, 'w') as f:
         serializable_state = {
             'counts': dict(counts),
@@ -36,17 +32,14 @@ def save_state(counts, alerted):
 
 def analyze_abnormal_signal_handling():
     time_window_seconds = 5
-    signal_threshold = 3
+    signal_threshold = 1
 
-    # 加载状态
     state = load_state()
     signal_counts = state['counts']
     alerted_pids_in_window = state['alerted']
 
-    # for line in sys.stdin:
     line = sys.stdin.read().strip()
     if not line:
-        # continue
         return
     try:
         log = json.loads(line)
@@ -60,7 +53,6 @@ def analyze_abnormal_signal_handling():
                 alert_key = f"{window_key}-{pid}"
                     
                 if alert_key in alerted_pids_in_window:
-                    # continue 
                     return
 
                 count = signal_counts[window_key][pid] + 1
@@ -85,7 +77,6 @@ def analyze_abnormal_signal_handling():
         }
         print(json.dumps(result))
         
-    # 保存状态
     save_state(signal_counts, alerted_pids_in_window)
 
 if __name__ == '__main__':

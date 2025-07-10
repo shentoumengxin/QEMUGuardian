@@ -3,11 +3,9 @@ import sys
 import os
 from collections import defaultdict
 
-# 状态文件的路径
 STATE_FILE = '/tmp/race_condition.state.json'
 
 def load_state():
-    """从文件加载状态。"""
     if not os.path.exists(STATE_FILE):
         return {
             'counts': defaultdict(lambda: {'madvise': 0, 'write': 0}),
@@ -16,7 +14,6 @@ def load_state():
     try:
         with open(STATE_FILE, 'r') as f:
             data = json.load(f)
-            # 加载时需要将普通dict转为defaultdict
             counts = defaultdict(lambda: {'madvise': 0, 'write': 0})
             counts.update(data.get('counts', {}))
             alerted = set(data.get('alerted', []))
@@ -28,10 +25,9 @@ def load_state():
         }
 
 def save_state(counts, alerted):
-    """将当前状态保存到文件。"""
     with open(STATE_FILE, 'w') as f:
         serializable_state = {
-            'counts': dict(counts),  # 将defaultdict转为dict进行保存
+            'counts': dict(counts),  
             'alerted': list(alerted)
         }
         json.dump(serializable_state, f)
@@ -47,7 +43,6 @@ def analyze_race_condition_dirty_cow():
 
     line = sys.stdin.read().strip()
     if not line:
-        # continue
         return
     try:
         log = json.loads(line)
@@ -59,16 +54,13 @@ def analyze_race_condition_dirty_cow():
 
         if log.get('event') == 'MADVISE' and log.get('advice') == 'MADV_DONTNEED':
             event_counts['madvise'] += 1
-        # 根据接口文档，write 事件没有 filename 字段，这里假设是为了检测 Dirty COW
-        # 漏洞而专门写入 /proc/self/mem
         elif log.get('event') == 'WRITE': 
-            # 这里可以增加对 fd 或 buf 内容的检查，如果 monitor.bt 支持
             event_counts['write'] += 1
 
         if event_counts['madvise'] >= madvise_thresh and \
            event_counts['write'] >= write_thresh and \
            window_key not in alerted_windows:
-                
+
             result = {
                     "level": 7.1,
                     "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:N/VC:N/VI:H/VA:N/SC:H/SI:H/SA:H",

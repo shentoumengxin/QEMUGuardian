@@ -3,16 +3,15 @@ import json
 import sys
 
 RECON_PATHS = {
-    "/proc/self/exe",  # 获取自身可执行文件路径
-    "/proc/self/cwd",  # 获取当前工作目录
-    "/proc/self/maps", # 获取内存映射信息 (绕过ASLR)
+    "/proc/self/exe",  
+    "/proc/self/cwd",  
+    "/proc/self/maps", 
 }
 
 def analyze_reconnaissance():
     line = sys.stdin.read().strip()
     if not line:
         return
-        # continue
     try:
         log = json.loads(line)
         if log.get('event') == 'READLINKAT':
