@@ -7,7 +7,6 @@ from collections import defaultdict
 STATE_FILE = '/tmp/reverse_shell.state.json'
 
 def load_state():
-    """从文件加载状态。"""
     if not os.path.exists(STATE_FILE):
         return defaultdict(lambda: {'connected': False})
     try:

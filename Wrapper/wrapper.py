@@ -126,7 +126,7 @@ def generate_report(results):
                 pgid = os.getpgid(pid)
                 print(f"[DEBUG] Got PGID {pgid} for PID {pid}")
                 seen_pids.add(pgid)
-                pid_to_pgid[pid] = pgid
+                # pid_to_pgid[pid] = pgid
             except ProcessLookupError:
                 print(f"[DEBUG] Process {pid} not found")
             except PermissionError as e:
