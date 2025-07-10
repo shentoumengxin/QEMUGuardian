@@ -9,15 +9,23 @@ from concurrent.futures import ThreadPoolExecutor
 import re
 from collections import deque
 import threading
-
+import uuid
+import time
+import errno
 seen_pids = set()       # 只追加不弹出，保留整个监控周期内见过的 PID
 hidden_failures = set()    # 记录那些 kill 失败的高危 PID
+_skip_cgroup_warning = False
 
 # Analyzer folder path
 ANALYZER_DIR = "./analyzers"
 
 # Vulnerability level threshold (e.g., >= 8 is high-risk)
-HIGH_VULNERABILITY_THRESHOLD = 5
+HIGH_VULNERABILITY_THRESHOLD = 8
+
+# ========== 新增：cgroup 相关全局变量 ==========
+CGROUP_NAME = None  # 将在 main() 中初始化
+CGROUP_PATH = None  # 将在 setup_cgroup() 中设置
+QEMU_PROCESS = None  # 保存 QEMU 进程对象
 
 # Map event types to analyzer scripts
 EVENT_ANALYZER_MAP = {
@@ -47,6 +55,261 @@ EVT_ANALYZER_MAP = {
     "MMAP_SUM": ["./analyzers/MemoryCorruption.py"],
 }
 
+# ========== 新版 setup_cgroup & add_process_to_cgroup，自动从 v2 降级到 v1 ==========
+def setup_cgroup(cgroup_name, memory_limit="2G", cpu_quota=200000, pids_max=1000):
+    """
+    优先尝试 cgroup v2（unified），权限不足时自动降级到 cgroup v1 各个子系统。
+    返回：
+      - 如果 v2 成功：返回字符串路径 CGROUP_PATH
+      - 如果降级到 v1：返回 dict {'memory': path, 'cpu': path, 'pids': path}
+      - 失败时返回 None
+    """
+    global CGROUP_PATH
+
+    # 1) 查 unified v2 挂载点
+    v2_mount = None
+    with open("/proc/mounts") as m:
+        for line in m:
+            dev, mnt, fs, *_ = line.split()
+            if fs == "cgroup2":
+                v2_mount = mnt
+                break
+
+    if v2_mount:
+        # 尝试开启 subtree_control
+        try:
+            ctrls = open(f"{v2_mount}/cgroup.controllers").read().split()
+            want = [f"+{c}" for c in ("memory","cpu","pids") if c in ctrls]
+            if want:
+                open(f"{v2_mount}/cgroup.subtree_control", "w").write(" ".join(want))
+            # 创建子 cgroup
+            CGROUP_PATH = f"{v2_mount}/{cgroup_name}"
+            os.makedirs(CGROUP_PATH, exist_ok=True)
+            # 写限制
+            open(f"{CGROUP_PATH}/memory.max", "w").write(memory_limit)
+            open(f"{CGROUP_PATH}/cpu.max",    "w").write(f"{cpu_quota} 100000")
+            open(f"{CGROUP_PATH}/pids.max",   "w").write(str(pids_max))
+            print(f"[CGROUP:v2] Created {CGROUP_PATH}, limits set")
+            return CGROUP_PATH
+        except PermissionError:
+            print("[CGROUP] unified v2 read-only or no permission, falling back to v1")
+        except FileNotFoundError:
+            print("[CGROUP] unified v2 missing control files, falling back to v1")
+        except Exception as e:
+            print(f"[CGROUP] v2 setup error: {e}, falling back to v1")
+
+    # 2) 降级到 cgroup v1：分别在 /sys/fs/cgroup/{memory,cpu,pids} 下创建子 cgroup
+    v1_paths = {}
+    for ctrl, limit_file, val in [
+        ("memory", "memory.limit_in_bytes", memory_limit),
+        ("cpu",    "cpu.cfs_quota_us",      str(cpu_quota)),
+        ("pids",   "pids.max",              str(pids_max)),
+    ]:
+        base = f"/sys/fs/cgroup/{ctrl}"
+        if not os.path.isdir(base):
+            print(f"[CGROUP:v1] {ctrl} not mounted, skipping")
+            continue
+        path = f"{base}/{cgroup_name}"
+        try:
+            os.makedirs(path, exist_ok=True)
+            open(f"{path}/{limit_file}", "w").write(val)
+            print(f"[CGROUP:v1] {ctrl} cgroup at {path}, set {limit_file}={val}")
+            v1_paths[ctrl] = path
+        except Exception as e:
+            print(f"[CGROUP:v1] Failed to setup {ctrl} at {path}: {e}")
+
+    if v1_paths:
+        CGROUP_PATH = v1_paths
+        return v1_paths
+
+    print("[CGROUP] No cgroup could be configured")
+    return None
+
+def add_process_to_cgroup(pid):
+    """
+    将 PID 添加到之前 setup_cgroup 返回的 cgroup。
+    - 对于 v2：CGROUP_PATH 是字符串，直接写到 cgroup.procs
+    - 对于 v1：CGROUP_PATH 是 dict，需要对每个子系统写入 cgroup.procs
+    """
+    global CGROUP_PATH
+
+    if not CGROUP_PATH:
+        print("[WARNING] cgroup not initialized")
+        return False
+
+    # v2 分支
+    if isinstance(CGROUP_PATH, str):
+        try:
+            open(f"{CGROUP_PATH}/cgroup.procs", "w").write(str(pid))
+            print(f"[CGROUP:v2] Added PID {pid}")
+            return True
+        except Exception as e:
+            print(f"[CGROUP:v2] Failed to add PID {pid}: {e}")
+            return False
+
+    # v1 分支
+    success = False
+    for ctrl, path in CGROUP_PATH.items():
+        try:
+            open(f"{path}/cgroup.procs", "w").write(str(pid))
+            print(f"[CGROUP:v1] Added PID {pid} to {ctrl}")
+            success = True
+        except Exception as e:
+            print(f"[CGROUP:v1] Failed to add PID {pid} to {ctrl} at {path}: {e}")
+    return success
+
+def launch_qemu_in_cgroup(qemu_cmd, cgroup_path):
+    """
+    在 cgroup 中启动 QEMU 进程 - 修改版
+    """
+    global QEMU_PROCESS
+    
+    # 直接启动 QEMU
+    try:
+        QEMU_PROCESS = subprocess.Popen(
+            qemu_cmd,
+            stdout=None,
+            stderr=None
+        )
+        
+        print(f"[QEMU] Started QEMU with PID: {QEMU_PROCESS.pid}")
+        
+        # 启动后将进程加入 cgroup
+        if cgroup_path and cgroup_path != "systemd":
+            time.sleep(0.1)  # 等待进程完全启动
+            add_process_to_cgroup(QEMU_PROCESS.pid)
+        
+        return QEMU_PROCESS
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to launch QEMU: {e}")
+        return None
+
+def terminate_cgroup():
+    """
+    终止 cgroup 中的所有进程，支持 v2 (单一路径) 与 v1 (dict 多路径)。
+    """
+    if not CGROUP_PATH:
+        print("[WARNING] cgroup not initialized")
+        return
+
+    # 构建所有可能的 cgroup.procs 路径
+    procs_files = []
+    if isinstance(CGROUP_PATH, dict):
+        # v1: 只关心 pids 子系统
+        p = CGROUP_PATH.get('pids')
+        if p:
+            procs_files.append(os.path.join(p, 'cgroup.procs'))
+    else:
+        # v2: 单一路径
+        procs_files.append(os.path.join(CGROUP_PATH, 'cgroup.procs'))
+
+    for procs in procs_files:
+        if os.path.exists(procs):
+            try:
+                with open(procs) as f:
+                    pids = [int(l) for l in f if l.strip()]
+                for pid in pids:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                print(f"[CGROUP] Killed all PIDs in {procs}")
+                ret = QEMU_PROCESS.poll()
+                if ret is not None:
+                    print(f"[INFO] QEMU exited with code {ret}")
+                else:
+                    print("[WARN] QEMU is still running!")
+                return
+                
+            except Exception as e:
+                print(f"[CGROUP] Error reading {procs}: {e}")
+
+    print(f"[CGROUP] cgroup.procs not found under {procs_files}, skipping termination")
+
+
+def cleanup_cgroup():
+    """
+    清理 cgroup 目录，支持 v2 与 v1，在删除前再次 terminate，再给 Kernel 一点时间，
+    然后对 ENOENT, EROFS, EBUSY 三类错误静默跳过，其他错误才打印警告。
+    """
+    if not CGROUP_PATH:
+        return
+
+    # 1) 再次杀掉所有剩余进程
+    terminate_cgroup()
+    # 2) 等一小会儿让 kernel 收回 cgroup 引用
+    time.sleep(0.5)
+
+    # 收集要删除的路径
+    dirs = []
+    if isinstance(CGROUP_PATH, dict):
+        # v1: memory, cpu, pids 各子系统目录
+        dirs = list(CGROUP_PATH.values())
+    else:
+        # v2: 单一路径
+        dirs = [CGROUP_PATH]
+
+    for d in dirs:
+        try:
+            os.rmdir(d)
+            print(f"[CGROUP] Removed cgroup: {d}")
+        except OSError as e:
+            # 仅对非 ENOENT/EROFS/EBUSY 错误打印警告
+            if e.errno not in (errno.ENOENT, errno.EROFS, errno.EBUSY):
+                print(f"[WARNING] Failed to cleanup cgroup {d}: {e}")
+            # Busy 或者 只读/不存在 的都跳过不报错
+
+def monitor_cgroup_resources():
+    """
+    监控 cgroup 资源使用情况（可在后台线程中运行）
+    """
+    if not CGROUP_PATH:
+        return False
+
+    # v2: CGROUP_PATH 是字符串
+    if isinstance(CGROUP_PATH, str):
+        memfile = os.path.join(CGROUP_PATH, "memory.current")
+        pidfile = os.path.join(CGROUP_PATH, "pids.current")
+    # v1: CGROUP_PATH 是 dict，包含各子系统路径
+    else:
+        memfile = os.path.join(CGROUP_PATH['memory'], "memory.usage_in_bytes")
+        pidfile = os.path.join(CGROUP_PATH['pids'], "pids.current")
+
+    mem_ok = os.path.exists(memfile)
+    pid_ok = os.path.exists(pidfile)
+
+    # 文件都不存在时，只警告一次，之后仍然保持监控开启
+    if not mem_ok and not pid_ok:
+        if not hasattr(monitor_cgroup_resources, "_warned"):
+            print(f"[CGROUP] No resource files under {CGROUP_PATH}, skipping this check")
+            monitor_cgroup_resources._warned = True
+        return False
+
+    try:
+        stats = []
+        if mem_ok:
+            with open(memfile, 'r') as f:
+                usage = int(f.read().strip())
+            stats.append(f"Mem={usage//1024//1024}MB")
+        if pid_ok:
+            with open(pidfile, 'r') as f:
+                pcount = int(f.read().strip())
+            stats.append(f"PIDs={pcount}")
+
+        print(f"[CGROUP STATS] {' '.join(stats)}")
+
+        # 检测 fork bomb
+        if pid_ok and pcount > 500:
+            print("[WARNING] Possible fork bomb in cgroup!")
+            return True
+
+    except Exception as e:
+        print(f"[ERROR] monitor_cgroup_resources error: {e}")
+
+    return False
+
+
 def run_analyzer(analyzer_script, data):
     """Run an individual analyzer script and return its result."""
     try:
@@ -71,11 +334,21 @@ def run_analyzer(analyzer_script, data):
         return {"level": -1, "description": f"Analyzer {analyzer_script} timed out", "analyzer": analyzer_script}
     except Exception as e:
         return {"level": -1, "description": f"Error: {str(e)}", "analyzer": analyzer_script}
+
 def safe_terminate(pid, report_lines):
     """
     Try to terminate the given PID (and its process group).  
     Append status messages into report_lines.
+    
+    修改：如果启用了 cgroup，使用 terminate_cgroup() 终止所有进程
     """
+    # ========== 修改：如果使用 cgroup，终止整个 cgroup ==========
+    if CGROUP_PATH:
+        report_lines.append(f"[CGROUP] Terminating all processes in cgroup due to high risk")
+        terminate_cgroup()
+        return True
+    
+    # 原有的终止逻辑
     try:
         pgid = os.getpgid(pid)
         os.killpg(pgid, signal.SIGTERM)
@@ -112,7 +385,7 @@ def generate_report(results):
         cvss_vector = result.get("cvss_vector", "Unknown")
         desc = result.get("description", "No description")
         analyzer = result.get("analyzer", "Unknown")
-        pid = int(result.get("pid"))
+        pid = result.get("pid")
         evidence = result.get("evidence", "No evidence")
         report.append(f"Analyzer: {analyzer}")
         report.append(f"Level: {level}")
@@ -120,13 +393,13 @@ def generate_report(results):
         report.append(f"Description: {desc}")
         if pid and pid != 0:
             try:
+                pid= int(pid)
                 # 先检查进程是否存在
                 os.kill(pid, 0)
                 print(f"[DEBUG] Process {pid} exists")
                 pgid = os.getpgid(pid)
                 print(f"[DEBUG] Got PGID {pgid} for PID {pid}")
                 seen_pids.add(pgid)
-                pid_to_pgid[pid] = pgid
             except ProcessLookupError:
                 print(f"[DEBUG] Process {pid} not found")
             except PermissionError as e:
@@ -143,18 +416,73 @@ def generate_report(results):
     return "\n".join(report)
 
 def main():
-
+    # ========== 新增：解析命令行参数 ==========
+    parser = argparse.ArgumentParser(description='QEMU Security Monitor with cgroup support')
+    parser.add_argument('--qemu-cmd', nargs='+', help='QEMU command to execute (e.g., qemu-system-x86_64 -m 1024)')
+    parser.add_argument('--cgroup', action='store_true', help='Enable cgroup resource limiting')
+    parser.add_argument('--memory-limit', default='2G', help='cgroup memory limit (default: 2G)')
+    parser.add_argument('--cpu-quota', type=int, default=200000, help='cgroup CPU quota (default: 200000 = 200%%)')
+    parser.add_argument('--pids-max', type=int, default=1000, help='cgroup max processes (default: 1000)')
+    
+    args = parser.parse_args()
     ans = input("Enable auto-isolation of all seen PIDs on hidden failures? [y/N]: ")
     auto_isolate = ans.strip().lower() == 'y'
+    # ========== 新增：设置 cgroup ==========
+    global CGROUP_NAME
     monitor_process = subprocess.Popen(
         ['bpftrace', 'monitor.bt'],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,    # ← 把 stderr 合并到 stdout
         text=True,
         encoding='utf-8',
         errors='replace'
     )
     print("Started monitor.bt, waiting for readiness...")
+    time.sleep(2)
+    if args.cgroup:
+        # 检查是否以 root 运行
+        if os.geteuid() != 0:
+            print("[ERROR] cgroup support requires root privileges")
+            print("Please run with sudo")
+            return
+        
+        # 生成唯一的 cgroup 名称
+        CGROUP_NAME = f"qemu_monitor_{uuid.uuid4().hex[:8]}"
+        
+        # 设置 cgroup
+        cgroup_path = setup_cgroup(
+            CGROUP_NAME,
+            memory_limit=args.memory_limit,
+            cpu_quota=args.cpu_quota,
+            pids_max=args.pids_max
+        )
+        
+        if not cgroup_path:
+            print("[ERROR] Failed to setup cgroup, exiting")
+            return
+        
+        # 如果提供了 QEMU 命令，启动 QEMU
+        if args.qemu_cmd:
+            # 只用局部 qemu_process
+            qemu_process = launch_qemu_in_cgroup(args.qemu_cmd, cgroup_path)
+            print(f"[DEBUG] QEMU process: {qemu_process!r}")
+            if not qemu_process:
+                print("[ERROR] Failed to launch QEMU")
+                cleanup_cgroup()
+                return
+
+            # 启动资源监控线程
+            def monitor_thread():
+                while QEMU_PROCESS and QEMU_PROCESS.poll() is None:
+                    if monitor_cgroup_resources():
+                        print("[ALERT] Abnormal resource usage detected!")
+                        terminate_cgroup()
+                        break
+                    time.sleep(5)
+            
+            monitor = threading.Thread(target=monitor_thread, daemon=True)
+            monitor.start()
+
 
    
     CONTROL_CHAR_RGX = re.compile(r'[\x00-\x1f]+')
@@ -162,12 +490,11 @@ def main():
         try:
             buffer = ""
             brace_count = 0
-
+            
             while True:
                 raw = monitor_process.stdout.readline()
                 if not raw:
                     break
-
                 if isinstance(raw, bytes):
                     chunk = raw.decode('utf-8', errors='ignore')
                 else:
@@ -188,10 +515,10 @@ def main():
                             line = buffer.strip()
                             buffer = ""
                             line = CONTROL_CHAR_RGX.sub('', line)
-                            # 下面走原先的 JSON 解析和分发逻辑
+                           
                             try:
                                 data = json.loads(line)
-                                print(f"Processing JSON event: {data}")
+                                #print(f"Processing JSON event: {data}")
                                 if data:
                                     pid = data.get("pid")
                                     pre_pid = data.get("prev_pid")
@@ -247,9 +574,8 @@ def main():
                                             print("Auto-isolation: terminating ALL seen PIDs.")
                                             for p in list(seen_pids):
                                                 try:
-                                                    pgid = os.getpgid(p)
-                                                    os.killpg(pgid, signal.SIGTERM)
-                                                    print(f"Terminated PGID {pgid} (PID {p})")
+                                                    os.killpg(p, signal.SIGTERM)
+                                                    print(f"Terminated PGID {p} ")
                                                 except Exception as e:
                                                     print(f"Error terminating PID {p}: {e}")
                                         else:
@@ -263,6 +589,12 @@ def main():
         except KeyboardInterrupt:
             monitor_process.terminate()
             print("Wrapper terminated.")
+        finally:
+            # ========== 新增：清理 ==========
+            if CGROUP_PATH:
+                cleanup_cgroup()
+            if QEMU_PROCESS:
+                QEMU_PROCESS.terminate()
 
 if __name__ == "__main__":
     main()
