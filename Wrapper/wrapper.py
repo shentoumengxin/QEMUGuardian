@@ -120,7 +120,7 @@ def generate_report(results):
         cvss_vector = result.get("cvss_vector", "Unknown")
         desc = result.get("description", "No description")
         analyzer = result.get("analyzer", "Unknown")
-        pid = result.get("pid")
+        pid = int(result.get("pid"))
         evidence = result.get("evidence", "No evidence")
         report.append(f"Analyzer: {analyzer}")
         report.append(f"Level: {level}")
@@ -188,7 +188,7 @@ def main():
                             # 下面走原先的 JSON 解析和分发逻辑
                             try:
                                 data = json.loads(line)
-                                # print(f"Processing JSON event: {data}")
+                                print(f"Processing JSON event: {data}")
                                 if data:
                                     pid = data.get("pid")
                                     if pid:

@@ -46,58 +46,59 @@ def analyze_info_leak():
     recent_recvs = state['recvs']
     recent_reads = state['reads']
 
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            log = json.loads(line)
-            event = log.get('event')
-            pid = log.get('pid')
+    line = sys.stdin.read().strip()
+    # for line in sys.stdin:
+    if not line:
+        return
+        # continue
+    try:
+        log = json.loads(line)
+        event = log.get('event')
+        pid = log.get('pid')
 
-            if event == 'RECVFROM':
-                recent_recvs.append({'size': log.get('size', 0), 'line_num': None})
-            elif event == 'SENDTO':
-                send_len = log.get('len', 0)
-                if send_len > threshold:
-                    for recv_info in reversed(recent_recvs):
-                        if send_len > recv_info['size'] * factor:
-                            results = {                                
-                                "level": 7.1,
-                                "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
-                                "description": "High Risk: Network Information Leak",
-                                "pid": pid,
-                                "evidence": f"Large send (len={send_len}) on this line, following small receive (size={recv_info['size']}) on line {recv_info['line_num']}",
-                            }
-                            print(json.dumps(results))
-                            break
+        if event == 'RECVFROM':
+            recent_recvs.append({'size': log.get('size', 0), 'line_num': None})
+        elif event == 'SENDTO':
+            send_len = log.get('len', 0)
+            if send_len > threshold:
+                for recv_info in reversed(recent_recvs):
+                    if send_len > recv_info['size'] * factor:
+                        results = {                                
+                            "level": 7.1,
+                            "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
+                            "description": "High Risk: Network Information Leak",
+                            "pid": pid,
+                            "evidence": f"Large send (len={send_len}) on this line, following small receive (size={recv_info['size']}) on line {recv_info['line_num']}",
+                        }
+                        print(json.dumps(results))
+                        break
 
-            elif event == 'READ':
-                read_size = len(log.get('buf', ''))
-                recent_reads.append({'size': read_size, 'line_num': None})
-            elif event == 'WRITE':
-                write_size = len(log.get('buf', ''))
-                if write_size > threshold:
-                    for read_info in reversed(recent_reads):
-                        if write_size > read_info['size'] * factor:
-                            results = {
-                                "level": 7.1,
-                                "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
-                                "description": "High Risk: File I/O Information Leak",
-                                "pid": pid,
-                                "evidence": f"Large write (size={write_size}) on this line, following small read (size={read_info['size']}) on line {read_info['line_num']}",
-                            }
-                            print(json.dumps(results))
-                            break
-        except json.JSONDecodeError:
-            results = {
-                "level": -1,
-                "description": f"Invalid JSON input: {line}",
-                "pid": None,
-            }
-            print(json.dumps(results))
+        elif event == 'READ':
+            read_size = len(log.get('buf', ''))
+            recent_reads.append({'size': read_size, 'line_num': None})
+        elif event == 'WRITE':
+            write_size = len(log.get('buf', ''))
+            if write_size > threshold:
+                for read_info in reversed(recent_reads):
+                    if write_size > read_info['size'] * factor:
+                        results = {
+                            "level": 7.1,
+                            "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
+                            "description": "High Risk: File I/O Information Leak",
+                            "pid": pid,
+                            "evidence": f"Large write (size={write_size}) on this line, following small read (size={read_info['size']}) on line {read_info['line_num']}",
+                        }
+                        print(json.dumps(results))
+                        break
+    except json.JSONDecodeError:
+        results = {
+            "level": -1,
+            "description": f"Invalid JSON input: {line}",
+            "pid": None,
+        }
+        print(json.dumps(results))
 
-        save_state(recent_recvs, recent_reads)
+    save_state(recent_recvs, recent_reads)
 
 if __name__ == '__main__':
     analyze_info_leak()
