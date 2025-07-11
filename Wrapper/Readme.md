@@ -57,12 +57,6 @@ sudo python script.py [options]
 
 After running the script, it prompts:
 
-text
-
-收起自动换行
-
-复制
-
 ```
 Enable auto-isolation of all seen PIDs on hidden failures? [y/N]:
 ```
@@ -75,7 +69,7 @@ Enable auto-isolation of all seen PIDs on hidden failures? [y/N]:
 1. Run with default settings (no QEMU, no cgroup)
 
    ```
-   python script.py
+   python3 wrapper.py --qemu-cmd qemu-x86_64 command-injection
    ```
 
    - Starts the bpftrace monitor without launching QEMU or setting up cgroups.
@@ -84,7 +78,7 @@ Enable auto-isolation of all seen PIDs on hidden failures? [y/N]:
 2. Run with cgroup and default limits
 
    ```
-   sudo python script.py --cgroup
+   sudo python3 wrapper.py --cgroup --qemu-cmd qemu-x86_64 command-injection
    ```
 
    - Enables cgroup with default limits (2G memory, 200000 CPU quota, 1000 max PIDs).
@@ -94,7 +88,7 @@ Enable auto-isolation of all seen PIDs on hidden failures? [y/N]:
 3. Run QEMU with cgroup and custom limits
 
    ```
-   sudo python script.py --cgroup --qemu-cmd qemu-system-x86_64 -m 1024 -hda disk.qcow2 --memory-limit 1G --cpu-quota 100000 --pids-max 500
+   sudo python3 wrapper.py --cgroup --qemu-cmd qemu-x86_64 malicous/previlege_escalation --memory-limit 1G --cpu-quota 100000 --pids-max 500
    ```
 
    - Launches QEMU with the specified command inside a cgroup.
