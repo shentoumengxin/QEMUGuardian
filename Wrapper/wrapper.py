@@ -12,6 +12,9 @@ import threading
 import uuid
 import time
 import errno
+from pathlib import Path
+import resource
+
 REPORT_GUI_PROCESS = None
 seen_pids = set()       # 只追加不弹出，保留整个监控周期内见过的 PID
 hidden_failures = set()    # 记录那些 kill 失败的高危 PID
@@ -22,41 +25,23 @@ ANALYZER_DIR = "./analyzers"
 
 # Vulnerability level threshold (e.g., >= 8 is high-risk)
 HIGH_VULNERABILITY_THRESHOLD = 8
-
+cfg_path = Path(__file__).parent / "config.json"
 # ========== 新增：cgroup 相关全局变量 ==========
 CGROUP_NAME = None  # 将在 main() 中初始化
 CGROUP_PATH = None  # 将在 setup_cgroup() 中设置
 QEMU_PROCESS = None  # 保存 QEMU 进程对象
 
 # Map event types to analyzer scripts
-EVENT_ANALYZER_MAP = {
-    "EXEC": ["./analyzers/CodeInjection.py", "./analyzers/FilelessExecution.py"],
-    # "EXEC": ["./analyzers/CodeInjection.py"],
-    "SETUID": ["./analyzers/AccessControl.py"],
-    "SETGID": ["./analyzers/AccessControl.py"],
-    "SETREUID": ["./analyzers/AccessControl.py"],
-    "SETRESUID": ["./analyzers/AccessControl.py"],
-    "TRACK_OPENAT": ["./analyzers/AccessControl.py"],
-    "TRACK_FORK": ["./analyzers/ForkBomb.py"],
-    "READ": ["./analyzers/InformationLeakage.py"],
-    "WRITE": [
-        "./analyzers/InformationLeakage.py",
-        "./analyzers/RaceCondition.py"],
-    "RECVFROM": ["./analyzers/InformationLeakage.py"],
-    "SENDTO": ["./analyzers/InformationLeakage.py"],
-    "MPROTECT": ["./analyzers/MemoryCorruption.py"],
-    "MADVISE": ["./analyzers/RaceCondition.py"],
-    "CONNECT": ["./analyzers/ReverseShell.py"],
-    "SIGNAL_GENERATE": ["./analyzers/AbnormalSignalHandling.py"],
-    "READLINKAT": ["./analyzers/Reconnaissance.py"],
-    "DUP2": ["./analyzers/ReverseShell.py"]
-}
+EVENT_ANALYZER_MAP = {}
 
-EVT_ANALYZER_MAP = {
-    "MMAP_SUM": ["./analyzers/MemoryCorruption.py"],
-}
+EVT_ANALYZER_MAP = {}
+def limit_procs(max_procs: int):
+    """
+    限制当前进程及其所有后代的最大进程数（线程也算）。max_procs 既是软限制也是硬限制——超出 fork() 立刻失败 (EAGAIN)。
+    """
+    resource.setrlimit(resource.RLIMIT_NPROC, (max_procs, max_procs))
 
-# ========== 新版 setup_cgroup & add_process_to_cgroup，自动从 v2 降级到 v1 ==========
+# ========== 自动从 v2 降级到 v1 ==========
 def setup_cgroup(cgroup_name, memory_limit="2G", cpu_quota=200000, pids_max=1000):
     """
     优先尝试 cgroup v2（unified），权限不足时自动降级到 cgroup v1 各个子系统。
@@ -159,7 +144,7 @@ def add_process_to_cgroup(pid):
             print(f"[CGROUP:v1] Failed to add PID {pid} to {ctrl} at {path}: {e}")
     return success
 
-def launch_qemu_in_cgroup(qemu_cmd, cgroup_path):
+def launch_qemu_in_cgroup(qemu_cmd, cgroup_path,max_procs=30):
     """
     在 cgroup 中启动 QEMU 进程 - 修改版
     """
@@ -169,11 +154,12 @@ def launch_qemu_in_cgroup(qemu_cmd, cgroup_path):
     try:
         QEMU_PROCESS = subprocess.Popen(
             qemu_cmd,
+            preexec_fn=lambda: limit_procs(max_procs),
             stdout=None,
             stderr=None
         )
         
-        print(f"[QEMU] Started QEMU with PID: {QEMU_PROCESS.pid}")
+        print(f"[QEMU] Started QEMU with PID: {QEMU_PROCESS.pid},max_procs={max_procs}")
         
         # 启动后将进程加入 cgroup
         if cgroup_path and cgroup_path != "systemd":
@@ -418,6 +404,10 @@ def generate_report(results):
 
 def main():
     global REPORT_GUI_PROCESS
+    with cfg_path.open("r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    EVENT_ANALYZER_MAP = cfg["EVENT_ANALYZER_MAP"]
+    EVT_ANALYZER_MAP  = cfg["EVT_ANALYZER_MAP"]
     os.system("python3 initial.py")
     try:
         # 使用 Popen 启动 GUI 脚本，并将它的标准输入（stdin）连接到一个管道
@@ -438,6 +428,7 @@ def main():
     parser.add_argument('--memory-limit', default='2G', help='cgroup memory limit (default: 2G)')
     parser.add_argument('--cpu-quota', type=int, default=200000, help='cgroup CPU quota (default: 200000 = 200%%)')
     parser.add_argument('--pids-max', type=int, default=1000, help='cgroup max processes (default: 1000)')
+    parser.add_argument('--fork-max', type=int, default=50, help='max fork (default: 50)')
     
     args = parser.parse_args()
     ans = input("Enable auto-isolation of all seen PIDs on hidden failures? [y/N]: ")
@@ -453,7 +444,7 @@ def main():
         errors='replace'
     )
     print("Started monitor.bt, waiting for readiness...")
-    time.sleep(2)
+    time.sleep(1)
     if args.cgroup:
         # 检查是否以 root 运行
         if os.geteuid() != 0:
@@ -479,7 +470,7 @@ def main():
         # 如果提供了 QEMU 命令，启动 QEMU
         if args.qemu_cmd:
             # 只用局部 qemu_process
-            qemu_process = launch_qemu_in_cgroup(args.qemu_cmd, cgroup_path)
+            qemu_process = launch_qemu_in_cgroup(args.qemu_cmd, cgroup_path,args.fork_max)
             print(f"[DEBUG] QEMU process: {qemu_process!r}")
             if not qemu_process:
                 print("[ERROR] Failed to launch QEMU")
