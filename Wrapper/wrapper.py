@@ -418,6 +418,7 @@ def generate_report(results):
 
 def main():
     global REPORT_GUI_PROCESS
+    os.system("python3 initial.py")
     try:
         # 使用 Popen 启动 GUI 脚本，并将它的标准输入（stdin）连接到一个管道
         REPORT_GUI_PROCESS = subprocess.Popen(
