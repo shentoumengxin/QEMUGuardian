@@ -356,13 +356,13 @@ def safe_terminate(pid, report_lines):
         hidden_failures.add(pid)
         return False
 
-def generate_report(results):
+def generate_report(results, exe_name):
     """Generate a report and handle high-risk vulnerabilities."""
     valid = [r for r in (results or []) if r is not None]
     # 如果过滤后列表空，就直接返回，不打印任何东西
     if not valid:
         return
-    report = [f"Vulnerability Report - {CURRENT_EXECUTABLE or 'Unknown'}"]
+    report = [f"Vulnerability Report - {exe_name}"]
     report.append("-" * 50)
     
     high_risk_pids = []
@@ -507,7 +507,7 @@ def run_executable_monitoring(executable_info, args, auto_isolate, monitor_proce
                     break
                 
                 # 4) 使用 select 检查是否有数据可读，超时时间设为 0.1 秒
-                readable, _, _ = select.select([monitor_process.stdout], [], [], 0.5)
+                readable, _, _ = select.select([monitor_process.stdout], [], [], 0.7)
                 
                 if not readable:
                     # 没有数据可读，继续循环
@@ -582,7 +582,7 @@ def run_executable_monitoring(executable_info, args, auto_isolate, monitor_proce
                                     if not results:
                                         continue
                                     
-                                    report = generate_report(results)
+                                    report = generate_report(results, executable_info['filename'])
                                     if not report:
                                         continue
                                     # 发送报告到 GUI
@@ -707,30 +707,33 @@ def main():
         print(f"[ERROR] Failed to analyze directory: {e}")
         return
     
-    # 启动 bpftrace 监控器
-    monitor_process = subprocess.Popen(
-        ['bpftrace', 'monitor.bt'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        errors='replace'
-    )
-    print("Started monitor.bt, waiting for readiness...")
-    time.sleep(1)
-    
+    print(f"[SCAN] Found {len(executables)} supported executable(s)")
+
     try:
         # 串行运行每个可执行文件
         for i, executable in enumerate(executables, 1):
             print(f"\n[PROGRESS] Processing {i}/{len(executables)}: {executable['filename']}")
+
+            # —— 每次启动独立的 bpftrace 监控器 —— 
+            monitor_process = subprocess.Popen(
+                ['bpftrace', 'monitor.bt'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
+            )
+            # 等待 bpftrace 脚本就绪
+            time.sleep(1)
+
+            # 传入这次的 monitor_process，跑分析
             run_executable_monitoring(executable, args, auto_isolate, monitor_process)
-            
-            # 在可执行文件之间添加短暂延迟
-            if i < len(executables):
-                print(f"\n[WAIT] Waiting before next executable...")
-                time.sleep(2)
-        
-        print(f"\n[COMPLETE] Finished analyzing all {len(executables)} executables")
+
+            # 跑完之后立刻关闭本次的监控
+            monitor_process.terminate()
+            monitor_process.wait()
+            print("[MONITOR] monitor.bt terminated for this executable.")
+            time.sleep(1)  
         print("Would you like to exit the wrapper? [y/N]: ")
         if input().strip().lower() == 'y':
             print("Exiting wrapper...")
