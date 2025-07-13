@@ -1,0 +1,122 @@
+
+--- Report Received at 2025-07-13 15:14:18 ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/MemoryCorruption.py
+Level: 9.3
+CVSS Vector: CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H
+Description: Memory Corruption (Shellcode)
+Evidence: Detected 'mprotect' call setting executable permissions (PROT_EXEC)
+[CGROUP] Terminating all processes in cgroup due to high risk
+==================================================
+
+--- Report Received at 2025-07-13 15:14:18 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/MemoryCorruption.py
+Level: 9.3
+CVSS Vector: CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H
+Description: Memory Corruption (Shellcode)
+Evidence: Detected 'mprotect' call setting executable permissions (PROT_EXEC)
+[CGROUP] Terminating all processes in cgroup due to high risk
+==================================================
+
+--- Report Received at 2025-07-13 15:14:18 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/InformationLeakage.py
+Level: 7.1
+CVSS Vector: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N
+Description: High Risk: File I/O Information Leak
+Evidence: Large write (size=50) on this line, following small read (size=0) on line None
+==================================================
+
+--- Report Received at 2025-07-13 15:14:18 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/InformationLeakage.py
+Level: 7.1
+CVSS Vector: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N
+Description: High Risk: File I/O Information Leak
+Evidence: Large write (size=49) on this line, following small read (size=0) on line None
+==================================================
+
+--- Report Received at 2025-07-13 15:14:19 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/AccessControl.py
+Level: 6.3
+CVSS Vector: CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:H/SI:H/SA:H
+Description: Potential Privilege Escalation
+Evidence: 'SETUID' call attempts to set uid to 0 (root)
+==================================================
+
+--- Report Received at 2025-07-13 15:14:19 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/InformationLeakage.py
+Level: 7.1
+CVSS Vector: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N
+Description: High Risk: File I/O Information Leak
+Evidence: Large write (size=49) on this line, following small read (size=0) on line None
+==================================================
+
+--- Report Received at 2025-07-13 15:14:19 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/AccessControl.py
+Level: 7.7
+CVSS Vector: CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N
+Description: Access to Sensitive File
+Evidence: Attempt to access sensitive file: /etc/shadow
+==================================================
+
+--- Report Received at 2025-07-13 15:14:19 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/InformationLeakage.py
+Level: 7.1
+CVSS Vector: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N
+Description: High Risk: File I/O Information Leak
+Evidence: Large write (size=54) on this line, following small read (size=5) on line None
+==================================================
+
+--- Report Received at 2025-07-13 15:14:19 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/AccessControl.py
+Level: 7.7
+CVSS Vector: CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N
+Description: Potential Path Traversal
+Evidence: Path contains '../' sequence
+==================================================
+
+--- Report Received at 2025-07-13 15:14:19 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/InformationLeakage.py
+Level: 7.1
+CVSS Vector: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N
+Description: High Risk: File I/O Information Leak
+Evidence: Large write (size=63) on this line, following small read (size=5) on line None
+==================================================
+
+--- Report Received at 2025-07-13 15:14:19 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/InformationLeakage.py
+Level: 7.1
+CVSS Vector: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N
+Description: High Risk: File I/O Information Leak
+Evidence: Large write (size=53) on this line, following small read (size=5) on line None
+==================================================
+
+--- Report Received at 2025-07-13 15:14:19 - test_access_control ---
+Vulnerability Report - test_access_control
+--------------------------------------------------
+Analyzer: ./analyzers/MemoryCorruption.py
+Level: 9.3
+CVSS Vector: CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H
+Description: Memory Corruption (Weak Signal)
+Evidence: Detected abnormally large page allocation via mmap: 32768 pages
+==================================================

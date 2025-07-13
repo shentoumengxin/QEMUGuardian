@@ -11,8 +11,11 @@ class ReportWindow:
         self.root.title("Vulnerability Report (Live)")
         self.root.geometry("800x600")
 
-        self.log_file_path = "vulnerability_report.log"
-        
+        self.cumulative_log_path = "vulnerability_report.log"
+
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.session_log_path = f"./report/report_session_{timestamp}.log"
+
         # 创建主框架
         main_frame = tk.Frame(root, bg="#1e1e1e")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -172,14 +175,23 @@ class ReportWindow:
             self.root.after(0, self._update_status, f"Error reading input: {e}")
 
     def _process_report_block(self, report_block):
-        """处理完整的报告块"""
-        # 写入日志文件
-        with open(self.log_file_path, "a", encoding="utf-8") as f:
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            executable_info = f" - {self.current_executable}" if self.current_executable else ""
-            f.write(f"\n--- Report Received at {timestamp}{executable_info} ---\n")
-            f.write(report_block)
-            f.write("\n")
+        log_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        executable_info = f" - {self.current_executable}" if self.current_executable else ""
+        log_header = f"\n--- Report Received at {log_timestamp}{executable_info} ---\n"
+
+        try:
+            with open(self.cumulative_log_path, "a", encoding="utf-8") as f:
+                f.write(log_header)
+                f.write(report_block)
+        except Exception as e:
+            print(f"[ERROR] Could not write to cumulative log '{self.cumulative_log_path}': {e}")
+
+        try:
+            with open(self.session_log_path, "a", encoding="utf-8") as f:
+                f.write(log_header)
+                f.write(report_block)
+        except Exception as e:
+            print(f"[ERROR] Could not write to session log '{self.session_log_path}': {e}")
 
         # 在 GUI 中显示
         self._add_text_with_tags(report_block)
@@ -190,11 +202,24 @@ class ReportWindow:
         self.text_area.config(state='disabled')
 
     def _on_closing(self):
-        """窗口关闭时的处理"""
-        # 保存最终统计信息
-        with open(self.log_file_path, "a", encoding="utf-8") as f:
-            f.write(f"\n--- Session ended at {datetime.datetime.now()} ---\n")
-            f.write(f"Total reports processed: {self.report_count}\n")
+        closing_message = (
+            f"\n--- Session ended at {datetime.datetime.now()} ---\n"
+            f"Total reports processed for last executable: {self.report_count}\n"
+        )
+        
+        # 写入累积日志
+        try:
+            with open(self.cumulative_log_path, "a", encoding="utf-8") as f:
+                f.write(closing_message)
+        except Exception as e:
+             print(f"[ERROR] Could not write closing message to cumulative log: {e}")
+
+        # 写入会话日志
+        try:
+            with open(self.session_log_path, "a", encoding="utf-8") as f:
+                f.write(closing_message)
+        except Exception as e:
+             print(f"[ERROR] Could not write closing message to session log: {e}")
         
         self.root.destroy()
         sys.exit(0)
