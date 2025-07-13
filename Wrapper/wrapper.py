@@ -405,13 +405,28 @@ def generate_report(results, exe_name):
 
     return "\n".join(report)
 
-def run_executable_monitoring(executable_info, args, auto_isolate, monitor_process):
-    """监控单个可执行文件的运行"""
+
+
+
+
+
+
+
+
+
+
+
+
+def run_executable_monitoring(executable_info, args, auto_isolate):
+    """
+    监控单个可执行文件的运行 (V2 - 包含完整的生命周期管理和管道排空逻辑)
+    """
     global QEMU_PROCESS, CGROUP_PATH, CGROUP_NAME, CURRENT_EXECUTABLE, seen_pids, hidden_failures
     global EVENT_ANALYZER_MAP, EVT_ANALYZER_MAP, REPORT_GUI_PROCESS
     
     # 重置状态
     QEMU_PROCESS = None
+    monitor_process = None # monitor.bt 进程句柄
     seen_pids = set()
     hidden_failures = set()
     CURRENT_EXECUTABLE = executable_info['filename']
@@ -421,220 +436,433 @@ def run_executable_monitoring(executable_info, args, auto_isolate, monitor_proce
     print(f"[MONITOR] Architecture: {executable_info['architecture']}")
     print(f"[MONITOR] Using QEMU: {executable_info['qemu_command']}")
     print(f"{'='*80}\n")
-    
-    # 构建 QEMU 命令
-    qemu_cmd = [executable_info['qemu_command'], executable_info['filepath']]
-    
-    # 如果启用了 cgroup，为每个可执行文件创建新的 cgroup
-    if args.cgroup:
-        # 清理之前的 cgroup
-        if CGROUP_PATH:
-            cleanup_cgroup()
-            CGROUP_PATH = None
-        
-        # 创建新的 cgroup
-        CGROUP_NAME = f"qemu_monitor_{executable_info['filename']}_{uuid.uuid4().hex[:8]}"
-        cgroup_path = setup_cgroup(
-            CGROUP_NAME,
-            memory_limit=args.memory_limit,
-            cpu_quota=args.cpu_quota,
-            pids_max=args.pids_max
+
+    try:
+        print("[MONITOR] Launching monitor.bt for this session...")
+        monitor_process = subprocess.Popen(
+            ['bpftrace', 'monitor.bt'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace'
         )
-        
-        if not cgroup_path:
-            print(f"[ERROR] Failed to setup cgroup for {executable_info['filename']}, skipping")
+        time.sleep(1) # 等待 bpftrace 就绪
+    except Exception as e:
+        print(f"[ERROR] Failed to launch monitor.bt: {e}")
+        return
+
+    def _process_json_line(line, executor):
+        CONTROL_CHAR_RGX = re.compile(r'[\x00-\x1f]+')
+        line = CONTROL_CHAR_RGX.sub('', line)
+        try:
+            data = json.loads(line)
+            if not data: return
+            
+            data['executable'] = executable_info['filename']
+            pid, pre_pid, parent_pid, child_pid = data.get("pid"), data.get("prev_pid"), data.get("parent"), data.get("child")
+            for p in [parent_pid, child_pid, pre_pid, pid]:
+                if p and p != 0:
+                    try: seen_pids.add(os.getpgid(p))
+                    except ProcessLookupError: pass
+            
+            event_type, evt_type = data.get("event"), data.get("evt")
+            target_analyzers = EVENT_ANALYZER_MAP.get(event_type, []) + EVT_ANALYZER_MAP.get(evt_type, [])
+            
+            if not target_analyzers: return
+            
+            futures = [executor.submit(run_analyzer, script, data) for script in target_analyzers]
+            results = [future.result() for future in futures]
+            if not results: return
+            
+            report = generate_report(results, executable_info['filename'])
+            if not report: return
+
+            # 发送报告到 GUI
+            if REPORT_GUI_PROCESS and REPORT_GUI_PROCESS.poll() is None:
+                try:
+                    REPORT_GUI_PROCESS.stdin.write(report + "\n" + "="*50 + "\n")
+                    REPORT_GUI_PROCESS.stdin.flush()
+                except (IOError, BrokenPipeError):
+                    print("[WARNING] Report GUI window was closed.")
+                    # 声明 nonlocal 或 global 以便修改
+                    # global REPORT_GUI_PROCESS 
+                    # REPORT_GUI_PROCESS = None
+            else:
+                print(report); print("=" * 50)
+        except json.JSONDecodeError:
+            # print(f"[DEBUG] Skipping non-JSON line from bpftrace: {line.strip()}")
             return
-        
-        # 启动 QEMU
-        qemu_process = launch_qemu_in_cgroup(qemu_cmd, cgroup_path, args.fork_max)
-        if not qemu_process:
-            print(f"[ERROR] Failed to launch QEMU for {executable_info['filename']}")
-            cleanup_cgroup()
-            return
-        
-        # 启动资源监控线程
+
+    # --- QEMU和cgroup的启动逻辑 (保持不变) ---
+    qemu_cmd = [executable_info['qemu_command'], executable_info['filepath']]
+    if args.cgroup:
+        if CGROUP_PATH: cleanup_cgroup(); CGROUP_PATH = None
+        CGROUP_NAME = f"qemu_monitor_{executable_info['filename']}_{uuid.uuid4().hex[:8]}"
+        cgroup_path = setup_cgroup(CGROUP_NAME, memory_limit=args.memory_limit, cpu_quota=args.cpu_quota, pids_max=args.pids_max)
+        if not cgroup_path: print(f"[ERROR] Failed to setup cgroup, skipping"); return
+        QEMU_PROCESS = launch_qemu_in_cgroup(qemu_cmd, cgroup_path, args.fork_max)
+        if not QEMU_PROCESS: print(f"[ERROR] Failed to launch QEMU"); cleanup_cgroup(); return
         monitor_stop = threading.Event()
         def monitor_thread():
             while not monitor_stop.is_set() and QEMU_PROCESS and QEMU_PROCESS.poll() is None:
-                if monitor_cgroup_resources():
-                    print("[ALERT] Abnormal resource usage detected!")
-                    terminate_cgroup()
-                    break
+                if monitor_cgroup_resources(): print("[ALERT] Abnormal resource usage!"); terminate_cgroup(); break
                 monitor_stop.wait(5)
-        
-        monitor = threading.Thread(target=monitor_thread, daemon=True)
-        monitor.start()
+        monitor = threading.Thread(target=monitor_thread, daemon=True); monitor.start()
     else:
-        # 不使用 cgroup，直接启动
         try:
-            QEMU_PROCESS = subprocess.Popen(
-                qemu_cmd,
-                stdout=None,
-                stderr=None
-            )
+            QEMU_PROCESS = subprocess.Popen(qemu_cmd, stdout=None, stderr=None)
             print(f"[QEMU] Started QEMU with PID: {QEMU_PROCESS.pid}")
-        except Exception as e:
-            print(f"[ERROR] Failed to launch QEMU for {executable_info['filename']}: {e}")
-            return
-    
-    # 监控循环
-    CONTROL_CHAR_RGX = re.compile(r'[\x00-\x1f]+')
+        except Exception as e: print(f"[ERROR] Failed to launch QEMU: {e}"); return
+    # --- QEMU启动逻辑结束 ---
+
     with ThreadPoolExecutor(max_workers=10) as executor:
         try:
-            buffer      = ""
+            buffer = ""
             brace_count = 0
             qemu_exited = False
-            exit_time   = None
-            grace_period = 1.0  # 1 秒缓冲期
-
+            exit_time = None
+            grace_period = 1.0
             start_time = time.time()
-            timeout    = args.timeout
+            timeout = args.timeout
 
+            # --- 主监控循环 (逻辑不变) ---
             while True:
-                if time.time() - start_time > timeout:
-                    print(f"[TIMEOUT] Execution timeout for {CURRENT_EXECUTABLE}")
-                    break
-                
-                # 2) 检查 QEMU 是否退出
+                if time.time() - start_time > timeout: print(f"[TIMEOUT] Execution timeout for {CURRENT_EXECUTABLE}"); break
                 if (not qemu_exited) and QEMU_PROCESS and QEMU_PROCESS.poll() is not None:
-                    qemu_exited = True
-                    exit_time   = time.time()
-                    print(f"[INFO] QEMU exited with code {QEMU_PROCESS.poll()}, entering grace period…")
-                
-                # 3) 如果已经过了缓冲期，就退出循环
-                if qemu_exited and (time.time() - exit_time) > grace_period:
-                    print("[DEBUG] Grace period elapsed, breaking monitor loop")
-                    break
-                
-                # 4) 使用 select 检查是否有数据可读，超时时间设为 0.1 秒
+                    qemu_exited = True; exit_time = time.time(); print(f"[INFO] QEMU exited with code {QEMU_PROCESS.poll()}, entering grace period…")
+                if qemu_exited and (time.time() - exit_time) > grace_period: break
                 readable, _, _ = select.select([monitor_process.stdout], [], [], 0.7)
-                
-                if not readable:
-                    # 没有数据可读，继续循环
-                    continue
-                
-                # 5) 读取数据（非阻塞）
+                if not readable: continue
                 try:
-                    raw = monitor_process.stdout.readline()
-                    if raw == "":  # bpftrace 进程自己结束
-                        print("[DEBUG] monitor.bt EOF")
-                        break
-                except IOError:
-                    # 没有数据，继续
-                    continue
-              
-                if isinstance(raw, bytes):
-                    chunk = raw.decode('utf-8', errors='ignore')
-                else:
-                    chunk = raw
+                    raw = monitor_process.stdout.readline();
+                    if raw == "": break
+                except IOError: continue
+                
+                if isinstance(raw, bytes): chunk = raw.decode('utf-8', errors='ignore')
+                else: chunk = raw
                 
                 for ch in chunk:
                     if ch == "{":
-                        if brace_count == 0:
-                            buffer = ""
+                        if brace_count == 0: buffer = ""
                         brace_count += 1
-                    
-                    if brace_count > 0:
-                        buffer += ch
-                    
+                    if brace_count > 0: buffer += ch
                     if ch == "}":
                         brace_count -= 1
-                        if brace_count == 0:
-                            line = buffer.strip()
-                            buffer = ""
-                            line = CONTROL_CHAR_RGX.sub('', line)
-                            
-                            try:
-                                data = json.loads(line)
-                                if data:
-                                    # 添加当前可执行文件信息
-                                    data['executable'] = executable_info['filename']
-                                    
-                                    # 处理 PID 信息
-                                    pid = data.get("pid")
-                                    pre_pid = data.get("prev_pid")
-                                    parent_pid = data.get("parent")
-                                    child_pid = data.get("child")
-                                    
-                                    # 收集所有相关的 PID
-                                    for p in [parent_pid, child_pid, pre_pid, pid]:
-                                        if p and p != 0:
-                                            try:
-                                                pg = os.getpgid(p)
-                                                seen_pids.add(pg)
-                                            except ProcessLookupError:
-                                                pass
-                                    
-                                    # 获取事件类型
-                                    event_type = data.get("event")
-                                    evt_type = data.get("evt")
-                                    target_analyzers = EVENT_ANALYZER_MAP.get(event_type, [])
-                                    target_analyzers += EVT_ANALYZER_MAP.get(evt_type, [])
-                                    
-                                    if not target_analyzers:
-                                        continue
-                                    
-                                    # 运行分析器
-                                    futures = [executor.submit(run_analyzer, script, data) 
-                                            for script in target_analyzers]
-                                    results = [future.result() for future in futures]
-                                    
-                                    if not results:
-                                        continue
-                                    
-                                    report = generate_report(results, executable_info['filename'])
-                                    if not report:
-                                        continue
-                                    # 发送报告到 GUI
-                                    if REPORT_GUI_PROCESS and REPORT_GUI_PROCESS.poll() is None:
-                                        try:
-                                            REPORT_GUI_PROCESS.stdin.write(report + "\n" + "="*50 + "\n")
-                                            REPORT_GUI_PROCESS.stdin.flush()
-                                        except (IOError, BrokenPipeError):
-                                            print("[WARNING] Report GUI window was closed.")
-                                            REPORT_GUI_PROCESS = None
-                                    else:
-                                        print(report)
-                                        print("=" * 50)
-                                    
-                                    # 处理隐藏的失败
-                                    if hidden_failures:
-                                        if auto_isolate:
-                                            print("Auto-isolation: terminating ALL seen PIDs.")
-                                            for p in list(seen_pids):
-                                                try:
-                                                    os.killpg(p, signal.SIGTERM)
-                                                    print(f"Terminated PGID {p}")
-                                                except Exception as e:
-                                                    print(f"Error terminating PID {p}: {e}")
-                                        else:
-                                            print("Danger! Auto-isolation is off, but some PIDs could not be terminated")
-                                        hidden_failures.clear()
-                            
-                            except json.JSONDecodeError as e:
-                                # 静默跳过无效的 JSON
-                                continue
-        
+                        if brace_count == 0: _process_json_line(buffer, executor); buffer = ""
+            
+            # ========== 步骤2: 增加“排空管道”阶段 ==========
+            print("[MONITOR] Main loop finished. Draining final output from monitor.bt...")
+            
+            # 温柔地请求 monitor.bt 终止，它会开始关闭并排空自己的缓冲区
+            monitor_process.terminate() 
+            
+            # 循环读取管道中所有剩下的数据，直到管道被bpftrace关闭(EOF)
+            for final_line in monitor_process.stdout:
+                # 复用相同的处理逻辑
+                # 再次用大括号逻辑处理，以防最后的数据不完整
+                for ch in final_line:
+                    if ch == "{":
+                        if brace_count == 0: buffer = ""
+                        brace_count += 1
+                    if brace_count > 0: buffer += ch
+                    if ch == "}":
+                        brace_count -= 1
+                        if brace_count == 0: _process_json_line(buffer, executor); buffer = ""
+
+            print("[MONITOR] Pipe drained. Analysis for this executable is complete.")
+
         except KeyboardInterrupt:
             print(f"\n[INTERRUPTED] Stopping analysis of {executable_info['filename']}")
         
         finally:
-            # 清理进程
-            if QEMU_PROCESS:
-                QEMU_PROCESS.terminate()
-                try:
-                    QEMU_PROCESS.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    QEMU_PROCESS.kill()
+            # --- 清理逻辑 (现在也管理 monitor_process) ---
+            if QEMU_PROCESS and QEMU_PROCESS.poll() is None:
+                QEMU_PROCESS.kill() # 使用kill确保退出
             
-            # 停止监控线程
+            if monitor_process and monitor_process.poll() is None:
+                monitor_process.kill() # 确保bpftrace也被终止
+            
             if args.cgroup and 'monitor_stop' in locals():
                 monitor_stop.set()
             
-            # 清理 cgroup
             if CGROUP_PATH:
                 cleanup_cgroup()
                 CGROUP_PATH = None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# def run_executable_monitoring(executable_info, args, auto_isolate, monitor_process):
+#     """监控单个可执行文件的运行"""
+#     global QEMU_PROCESS, CGROUP_PATH, CGROUP_NAME, CURRENT_EXECUTABLE, seen_pids, hidden_failures
+#     global EVENT_ANALYZER_MAP, EVT_ANALYZER_MAP, REPORT_GUI_PROCESS
+    
+#     # 重置状态
+#     QEMU_PROCESS = None
+#     seen_pids = set()
+#     hidden_failures = set()
+#     CURRENT_EXECUTABLE = executable_info['filename']
+    
+#     print(f"\n{'='*80}")
+#     print(f"[MONITOR] Starting analysis of: {executable_info['filename']}")
+#     print(f"[MONITOR] Architecture: {executable_info['architecture']}")
+#     print(f"[MONITOR] Using QEMU: {executable_info['qemu_command']}")
+#     print(f"{'='*80}\n")
+    
+#     # 构建 QEMU 命令
+#     qemu_cmd = [executable_info['qemu_command'], executable_info['filepath']]
+    
+#     # 如果启用了 cgroup，为每个可执行文件创建新的 cgroup
+#     if args.cgroup:
+#         # 清理之前的 cgroup
+#         if CGROUP_PATH:
+#             cleanup_cgroup()
+#             CGROUP_PATH = None
+        
+#         # 创建新的 cgroup
+#         CGROUP_NAME = f"qemu_monitor_{executable_info['filename']}_{uuid.uuid4().hex[:8]}"
+#         cgroup_path = setup_cgroup(
+#             CGROUP_NAME,
+#             memory_limit=args.memory_limit,
+#             cpu_quota=args.cpu_quota,
+#             pids_max=args.pids_max
+#         )
+        
+#         if not cgroup_path:
+#             print(f"[ERROR] Failed to setup cgroup for {executable_info['filename']}, skipping")
+#             return
+        
+#         # 启动 QEMU
+#         qemu_process = launch_qemu_in_cgroup(qemu_cmd, cgroup_path, args.fork_max)
+#         if not qemu_process:
+#             print(f"[ERROR] Failed to launch QEMU for {executable_info['filename']}")
+#             cleanup_cgroup()
+#             return
+        
+#         # 启动资源监控线程
+#         monitor_stop = threading.Event()
+#         def monitor_thread():
+#             while not monitor_stop.is_set() and QEMU_PROCESS and QEMU_PROCESS.poll() is None:
+#                 if monitor_cgroup_resources():
+#                     print("[ALERT] Abnormal resource usage detected!")
+#                     terminate_cgroup()
+#                     break
+#                 monitor_stop.wait(5)
+        
+#         monitor = threading.Thread(target=monitor_thread, daemon=True)
+#         monitor.start()
+#     else:
+#         # 不使用 cgroup，直接启动
+#         try:
+#             QEMU_PROCESS = subprocess.Popen(
+#                 qemu_cmd,
+#                 stdout=None,
+#                 stderr=None
+#             )
+#             print(f"[QEMU] Started QEMU with PID: {QEMU_PROCESS.pid}")
+#         except Exception as e:
+#             print(f"[ERROR] Failed to launch QEMU for {executable_info['filename']}: {e}")
+#             return
+    
+#     # 监控循环
+#     CONTROL_CHAR_RGX = re.compile(r'[\x00-\x1f]+')
+#     with ThreadPoolExecutor(max_workers=10) as executor:
+#         try:
+#             buffer      = ""
+#             brace_count = 0
+#             qemu_exited = False
+#             exit_time   = None
+#             grace_period = 1.0  # 1 秒缓冲期
+
+#             start_time = time.time()
+#             timeout    = args.timeout
+
+#             while True:
+#                 if time.time() - start_time > timeout:
+#                     print(f"[TIMEOUT] Execution timeout for {CURRENT_EXECUTABLE}")
+#                     break
+                
+#                 # 2) 检查 QEMU 是否退出
+#                 if (not qemu_exited) and QEMU_PROCESS and QEMU_PROCESS.poll() is not None:
+#                     qemu_exited = True
+#                     exit_time   = time.time()
+#                     print(f"[INFO] QEMU exited with code {QEMU_PROCESS.poll()}, entering grace period…")
+                
+#                 # 3) 如果已经过了缓冲期，就退出循环
+#                 if qemu_exited and (time.time() - exit_time) > grace_period:
+#                     print("[DEBUG] Grace period elapsed, breaking monitor loop")
+#                     break
+                
+#                 # 4) 使用 select 检查是否有数据可读，超时时间设为 0.1 秒
+#                 readable, _, _ = select.select([monitor_process.stdout], [], [], 0.7)
+                
+#                 if not readable:
+#                     # 没有数据可读，继续循环
+#                     continue
+                
+#                 # 5) 读取数据（非阻塞）
+#                 try:
+#                     raw = monitor_process.stdout.readline()
+#                     if raw == "":  # bpftrace 进程自己结束
+#                         print("[DEBUG] monitor.bt EOF")
+#                         break
+#                 except IOError:
+#                     # 没有数据，继续
+#                     continue
+              
+#                 if isinstance(raw, bytes):
+#                     chunk = raw.decode('utf-8', errors='ignore')
+#                 else:
+#                     chunk = raw
+                
+#                 for ch in chunk:
+#                     if ch == "{":
+#                         if brace_count == 0:
+#                             buffer = ""
+#                         brace_count += 1
+                    
+#                     if brace_count > 0:
+#                         buffer += ch
+                    
+#                     if ch == "}":
+#                         brace_count -= 1
+#                         if brace_count == 0:
+#                             line = buffer.strip()
+#                             buffer = ""
+#                             line = CONTROL_CHAR_RGX.sub('', line)
+                            
+#                             try:
+#                                 data = json.loads(line)
+#                                 if data:
+#                                     # 添加当前可执行文件信息
+#                                     data['executable'] = executable_info['filename']
+                                    
+#                                     # 处理 PID 信息
+#                                     pid = data.get("pid")
+#                                     pre_pid = data.get("prev_pid")
+#                                     parent_pid = data.get("parent")
+#                                     child_pid = data.get("child")
+                                    
+#                                     # 收集所有相关的 PID
+#                                     for p in [parent_pid, child_pid, pre_pid, pid]:
+#                                         if p and p != 0:
+#                                             try:
+#                                                 pg = os.getpgid(p)
+#                                                 seen_pids.add(pg)
+#                                             except ProcessLookupError:
+#                                                 pass
+                                    
+#                                     # 获取事件类型
+#                                     event_type = data.get("event")
+#                                     evt_type = data.get("evt")
+#                                     target_analyzers = EVENT_ANALYZER_MAP.get(event_type, [])
+#                                     target_analyzers += EVT_ANALYZER_MAP.get(evt_type, [])
+                                    
+#                                     if not target_analyzers:
+#                                         continue
+                                    
+#                                     # 运行分析器
+#                                     futures = [executor.submit(run_analyzer, script, data) 
+#                                             for script in target_analyzers]
+#                                     results = [future.result() for future in futures]
+                                    
+#                                     if not results:
+#                                         continue
+                                    
+#                                     report = generate_report(results, executable_info['filename'])
+#                                     if not report:
+#                                         continue
+#                                     # 发送报告到 GUI
+#                                     if REPORT_GUI_PROCESS and REPORT_GUI_PROCESS.poll() is None:
+#                                         try:
+#                                             REPORT_GUI_PROCESS.stdin.write(report + "\n" + "="*50 + "\n")
+#                                             REPORT_GUI_PROCESS.stdin.flush()
+#                                         except (IOError, BrokenPipeError):
+#                                             print("[WARNING] Report GUI window was closed.")
+#                                             REPORT_GUI_PROCESS = None
+#                                     else:
+#                                         print(report)
+#                                         print("=" * 50)
+                                    
+#                                     # 处理隐藏的失败
+#                                     if hidden_failures:
+#                                         if auto_isolate:
+#                                             print("Auto-isolation: terminating ALL seen PIDs.")
+#                                             for p in list(seen_pids):
+#                                                 try:
+#                                                     os.killpg(p, signal.SIGTERM)
+#                                                     print(f"Terminated PGID {p}")
+#                                                 except Exception as e:
+#                                                     print(f"Error terminating PID {p}: {e}")
+#                                         else:
+#                                             print("Danger! Auto-isolation is off, but some PIDs could not be terminated")
+#                                         hidden_failures.clear()
+                            
+#                             except json.JSONDecodeError as e:
+#                                 # 静默跳过无效的 JSON
+#                                 continue
+        
+#         except KeyboardInterrupt:
+#             print(f"\n[INTERRUPTED] Stopping analysis of {executable_info['filename']}")
+        
+#         finally:
+#             # 清理进程
+#             if QEMU_PROCESS:
+#                 QEMU_PROCESS.terminate()
+#                 try:
+#                     QEMU_PROCESS.wait(timeout=5)
+#                 except subprocess.TimeoutExpired:
+#                     QEMU_PROCESS.kill()
+            
+#             # 停止监控线程
+#             if args.cgroup and 'monitor_stop' in locals():
+#                 monitor_stop.set()
+            
+#             # 清理 cgroup
+#             if CGROUP_PATH:
+#                 cleanup_cgroup()
+#                 CGROUP_PATH = None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def main():
     global REPORT_GUI_PROCESS, EVENT_ANALYZER_MAP, EVT_ANALYZER_MAP
@@ -715,24 +943,25 @@ def main():
             print(f"\n[PROGRESS] Processing {i}/{len(executables)}: {executable['filename']}")
 
             # —— 每次启动独立的 bpftrace 监控器 —— 
-            monitor_process = subprocess.Popen(
-                ['bpftrace', 'monitor.bt'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',
-                errors='replace'
-            )
+            # monitor_process = subprocess.Popen(
+            #     ['bpftrace', 'monitor.bt'],
+            #     stdout=subprocess.PIPE,
+            #     stderr=subprocess.STDOUT,
+            #     text=True,
+            #     encoding='utf-8',
+            #     errors='replace'
+            # )
             # 等待 bpftrace 脚本就绪
-            time.sleep(1)
+            # time.sleep(1)
 
             # 传入这次的 monitor_process，跑分析
-            run_executable_monitoring(executable, args, auto_isolate, monitor_process)
+            # run_executable_monitoring(executable, args, auto_isolate, monitor_process)
 
             # 跑完之后立刻关闭本次的监控
-            monitor_process.terminate()
-            monitor_process.wait()
-            print("[MONITOR] monitor.bt terminated for this executable.")
+            # monitor_process.terminate()
+            # monitor_process.wait()
+            # print("[MONITOR] monitor.bt terminated for this executable.")
+            run_executable_monitoring(executable, args, auto_isolate)
             time.sleep(1)  
         print("Would you like to exit the wrapper? [y/N]: ")
         if input().strip().lower() == 'y':
@@ -743,7 +972,7 @@ def main():
     
     finally:
         # 清理
-        monitor_process.terminate()
+        # monitor_process.terminate()
         print("Monitor terminated.")
         
         if REPORT_GUI_PROCESS:

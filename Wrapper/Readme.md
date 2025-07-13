@@ -42,7 +42,7 @@ python3 setup.py
 
 ```
 .
-├── wrapper_modified.py      # 主监控程序
+├── wrapper.py      # 主监控程序
 ├── arch_analyzer.py         # 架构分析器
 ├── report_gui.py           # 报告显示窗口
 ├── monitor.bt              # BPFTrace 监控脚本
@@ -51,8 +51,6 @@ python3 setup.py
 ├── analyzers/              # 分析器目录
 │   ├── sample_analyzer.py  # 示例分析器
 │   └── ...                 # 其他分析器
-├── setup.py                # 环境设置脚本
-└── test_integration.py     # 集成测试脚本
 ```
 
 ## 使用方法
@@ -61,13 +59,13 @@ python3 setup.py
 
 ```bash
 # 基本使用（不需要 root）
-python3 wrapper_modified.py /path/to/executables
+python3 wrapper.py /path/to/executables
 
 # 启用 cgroup 资源限制（需要 root）
-sudo python3 wrapper_modified.py /path/to/executables --cgroup
+sudo python3 wrapper.py /path/to/executables --cgroup
 
 # 自定义资源限制
-sudo python3 wrapper_modified.py /path/to/executables \
+sudo python3 wrapper.py /path/to/executables \
     --cgroup \
     --memory-limit 1G \
     --cpu-quota 100000 \
@@ -81,12 +79,6 @@ sudo python3 wrapper_modified.py /path/to/executables \
 python3 arch_analyzer.py /path/to/executables
 ```
 
-### 3. 运行测试
-
-```bash
-python3 test_integration.py
-```
-
 ## 配置文件
 
 `config.json` 定义了事件到分析器的映射：
@@ -94,12 +86,26 @@ python3 test_integration.py
 ```json
 {
   "EVENT_ANALYZER_MAP": {
-    "execve": ["analyzers/execve_analyzer.py"],
-    "open": ["analyzers/file_analyzer.py"],
-    "connect": ["analyzers/network_analyzer.py"]
+    "EXEC": ["./analyzers/CodeInjection.py", "./analyzers/FilelessExecution.py"],
+    "SETUID": ["./analyzers/AccessControl.py"],
+    "SETGID": ["./analyzers/AccessControl.py"],
+    "SETREUID": ["./analyzers/AccessControl.py"],
+    "SETRESUID": ["./analyzers/AccessControl.py"],
+    "TRACK_OPENAT": ["./analyzers/AccessControl.py"],
+    "TRACK_FORK": ["./analyzers/ForkBomb.py"],
+    "READ": ["./analyzers/InformationLeakage.py"],
+    "WRITE": ["./analyzers/InformationLeakage.py", "./analyzers/RaceCondition.py"],
+    "RECVFROM": ["./analyzers/InformationLeakage.py"],
+    "SENDTO": ["./analyzers/InformationLeakage.py"],
+    "MPROTECT": ["./analyzers/MemoryCorruption.py"],
+    "MADVISE": ["./analyzers/RaceCondition.py"],
+    "CONNECT": ["./analyzers/ReverseShell.py"],
+    "SIGNAL_GENERATE": ["./analyzers/AbnormalSignalHandling.py"],
+    "READLINKAT": ["./analyzers/Reconnaissance.py"],
+    "DUP2": ["./analyzers/ReverseShell.py"]
   },
   "EVT_ANALYZER_MAP": {
-    "syscall": ["analyzers/syscall_analyzer.py"]
+    "MMAP_SUM": ["./analyzers/MemoryCorruption.py"]
   }
 }
 ```

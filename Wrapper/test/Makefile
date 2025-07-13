@@ -1,6 +1,8 @@
-QEMU_RUNNER := qemu-x86_64
-CC          := gcc
-CFLAGS      := -g -O0
+# QEMU_RUNNER := qemu-x86_64
+QEMU_RUNNER := qemu-riscv64
+# CC          := gcc
+CC          := riscv64-unknown-linux-gnu-gcc
+CFLAGS      := -g -O0 -static
 
 SRC_DIR     := src
 BIN_DIR     := bin
