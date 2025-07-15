@@ -227,7 +227,7 @@ def cleanup_cgroup():
     # 1) 再次杀掉所有剩余进程
     terminate_cgroup()
     # 2) 等一小会儿让 kernel 收回 cgroup 引用
-    time.sleep(0.5)
+    time.sleep(0.005)
 
     # 收集要删除的路径
     dirs = []
@@ -962,7 +962,7 @@ def main():
             # monitor_process.wait()
             # print("[MONITOR] monitor.bt terminated for this executable.")
             run_executable_monitoring(executable, args, auto_isolate)
-            time.sleep(1)  
+            time.sleep(0.01)  
         print("Would you like to exit the wrapper? [y/N]: ")
         if input().strip().lower() == 'y':
             print("Exiting wrapper...")

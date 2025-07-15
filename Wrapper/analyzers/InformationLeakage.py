@@ -35,7 +35,7 @@ def save_state(recvs, reads):
 
 def analyze_info_leak():
     factor = 10
-    threshold = 16
+    threshold = 4096
 
     state = load_state()
     recent_recvs = state['recvs']

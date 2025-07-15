@@ -2,7 +2,7 @@ import json
 import sys
 
 def analyze_memory_corruption():
-    max_pages_threshold = 1000
+    max_pages_threshold = 65536
 
     line = sys.stdin.read().strip()
     if not line:
