@@ -47,7 +47,7 @@ int main(int argc, char *argv[]) {
     
     printf("--> [M.2] Attack: Simulating data exfiltration via file I/O...\n");
     char small_buf[10];
-    char large_buf[8192];
+    char large_buf[16384];
     memset(large_buf, 'Z', sizeof(large_buf));
     int temp_fd = open("/tmp/exfil.dat", O_CREAT | O_RDWR | O_TRUNC, 0644);
     if (temp_fd != -1) {
@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
     printf("--> [M.3] Attack: Intentionally causing SIGILL (Illegal Instruction)...\n");
     signal(SIGILL, sig_handler_for_test);
     // 在一些架构上，ud2是明确的非法指令
-    __asm__("ud2");
+    // __asm__("ud2");
 
     // 由于信号处理器会退出，这部分代码将不会被执行
     printf("\n======== This line should not be reached. ========\n");

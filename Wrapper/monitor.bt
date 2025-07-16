@@ -14,6 +14,15 @@ tracepoint:syscalls:sys_enter_openat
            pid, comm, str(args->filename));
 }
 
+tracepoint:syscalls:sys_enter_open 
+/ strncmp(comm, "qemu-", 5) == 0 /
+{
+    @monitored[pid] = 1;
+    // Track file open by QEMU-user process
+    printf("{\"ts\":%llu,\"event\": \"TRACK_OPEN\", \"pid\": %d, \"bin\": \"%s\", \"file\": \"%s\"}\n",nsecs/1000000000ULL,
+           pid, comm, str(args->filename));
+}
+
 // When a monitored process forks (fork/clone/vfork), add the child PID to monitored list
 tracepoint:sched:sched_process_fork 
 / @monitored[args->parent_pid] /

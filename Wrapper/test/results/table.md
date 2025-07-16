@@ -1,0 +1,1 @@
+现在搞了三个test suite,每个suite中有若干个具体的测试([S+数字]开头的是安全代码,[M+数字]开头的是恶意代码),每段代码分别测试一个对应analyzer是否能正确识别出恶意代码.具体实验过程为在本地运行wrapper.py测试三个suite可执行文件(execution_backdoor_adv memory_resource_adv recon_privsec_adv),可以得到wrapper.py返回的分析报告;又由于测试是人为设计的,就可以对比得到TP(有漏洞且检测出来了) TN(没漏洞且没有错误报错) FN(有漏洞但没报出来) FP(没漏洞但报出来了)

