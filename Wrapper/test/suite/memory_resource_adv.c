@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
     printf("--> [M.3] Attack: Intentionally causing SIGILL (Illegal Instruction)...\n");
     signal(SIGILL, sig_handler_for_test);
     // 在一些架构上，ud2是明确的非法指令
-    // __asm__("ud2");
+    __asm__("ud2");
 
     // 由于信号处理器会退出，这部分代码将不会被执行
     printf("\n======== This line should not be reached. ========\n");
