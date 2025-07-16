@@ -25,7 +25,7 @@ It is a powerful and easy-to-use security analysis toolkit for Linux executables
 - **Real-Time Reports** 
    View security findings instantly through a convenient GUI.
 
-> **Note:** If you are interested in this project and would like to contribute, feel free to contact us or check the README in the [`wrapper`](./wrapper) folder.  
+> **Note:** If you are interested in this project and would like to contribute, feel free to contact us or check the README in the [`Wrapper`](./Wrapper) folder.  
 > We welcome your help in developing new analyzers!
 
 
@@ -60,7 +60,7 @@ This plugin will automatically communicate with our sever, then give you the vul
 
 ## Started 🚀
 
-1. **Go to the  [`wrapper`](./wrapper) directory in this repository.**
+1. **Go to the  [`Wrapper`](./Wrapper) directory in this repository.**
 2. **Follow the instructions in the README to install dependencies and start analyzing your executables!**
 3. **You can also go to [`ChromeExtension`](./ChromeExtension) directory to get a File Scan Interceptor and Guardian. It can detect the ELF download from your browser and send to out demo-Server automatically, then give you a vulnerability report.**
 
