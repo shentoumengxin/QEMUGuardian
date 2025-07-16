@@ -27,6 +27,6 @@ Whether you’re a security researcher, reverse engineer, or developer, **qemu-g
 
 1. **Go to the `wrapper` directory in this repository.**
 2. **Follow the instructions in the README to install dependencies and start analyzing your executables!**
-
+3. **If you are windows or linux user, you can go to 'ChromeExtension' to get a File Scan Interceptor and Guadian. It can detect the ELF download from your browser and send to out demo-Server automatically.**
 Ready to make your analysis smarter and safer?
  **Download qemu-guardian and get started today!** ✨
