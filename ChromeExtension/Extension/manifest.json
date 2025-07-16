@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "File Scan Interceptor",
+  "version": "1.0",
+  "description": "Monitors file downloads and sends info to a local scanning service.",
+  "permissions": [
+    "downloads",        
+    "nativeMessaging",
+    "notifications",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "images/guardian_min.png",
+      "48": "images/guardian_min.png",
+      "128": "imagesguardian.png"
+    }
+  },
+  "icons": {
+    "16": "images/guardian_min.pngg",
+    "48": "images/guardian_min.png",
+    "128": "images/guardian.png"
+  },
+  "host_permissions": ["<all_urls>"]
+}
