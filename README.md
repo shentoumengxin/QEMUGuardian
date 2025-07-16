@@ -6,7 +6,7 @@
 
 The **Wrapper** leverage eBPF to monitor QEMU-user, then distribute the captured syscalls to the analyzers for analysis.
 
-![b2a488b6ef4ff796e3b3e715631b07b3_](README.assets/b2a488b6ef4ff796e3b3e715631b07b3_.png)
+<img src="README.assets/b2a488b6ef4ff796e3b3e715631b07b3_-1752689870453-1.png" alt="b2a488b6ef4ff796e3b3e715631b07b3_" style="zoom:56%;" />
 
 It is a powerful and easy-to-use security analysis toolkit for Linux executables across multiple CPU architectures. With qemu-guardian, you can quickly analyze, monitor, and assess the security risks of untrusted ELF binaries—even if they are compiled for platforms different from your host. 🚀
 
@@ -32,7 +32,7 @@ It is a powerful and easy-to-use security analysis toolkit for Linux executables
 
 ## Further, We Have Released Guardian
 
-<img src="README.assets/Guardian.png" alt="Guardian" style="zoom:50%;" />
+<img src="README.assets/Guardian-1752689885402-3.png" alt="Guardian" style="zoom:45%;" />
 
 **Guardian** 🛡️is a chrome plugin that can detect and isolate downloaded ELF files, upload them to a
 server for wrapper analysis, and return the results.
