@@ -353,6 +353,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ path: path });
     });
     return true;
+  } else if (request.type === "ANALYZE_FILE") {
+    const downloadPath = request.filePath;
+    const filename = request.filePath;
+    const notificationId = generateUniqueNotificationId();
+    console.log(`User chose to quarantine file: ${downloadPath}`);
+
+    const port = getNativeHostPort();
+    if (!port) {
+        showNotification("Communication Error", "Could not connect to the file processing service.", true, notificationId);
+        return;
+    }
+
+    // Get the custom isolation path from storage
+    chrome.storage.local.get(ISOLATION_PATH_STORAGE_KEY, (data) => {
+      const customIsolationPath = data[ISOLATION_PATH_STORAGE_KEY] || "";
+      console.log("Using custom isolation path from storage:", customIsolationPath);
+
+      const message = {
+        type: "INITIATE_FILE_ISOLATION",
+        downloadPath: downloadPath, // Full path where Chrome downloaded it
+        filename: filename,
+        isolationPath: customIsolationPath, // User's preferred isolation path
+        notificationId: notificationId // Pass unique ID for tracking
+      };
+      port.postMessage(message);
+      console.log("Sent INITIATE_FILE_ISOLATION message to native host:", message);
+    });
   }
 });
 

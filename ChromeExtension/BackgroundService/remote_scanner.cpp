@@ -174,7 +174,7 @@ void perform_remote_scan_and_notify(const PendingFileDetails &pendingFileDetail)
     ParsedScanResult parsed_result;
     bool report_received = false;
     int retry_count = 0;
-    const int MAX_RETRIES = 3; // Max attempts to get the report
+    const int MAX_RETRIES = 5; // Max attempts to get the report
     const std::chrono::seconds RETRY_INTERVAL(5); // Wait 5 seconds between retries
 
     while (!report_received && retry_count < MAX_RETRIES) {
