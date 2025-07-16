@@ -1,6 +1,6 @@
 // Define your Native Host's name
 const NATIVE_HOST_NAME = "com.nus_dada_group.guardian";
-const ISOLATION_PATH_STORAGE_KEY = "qemuGuardianIsolationPath"; // Key for storage
+const ISOLATION_PATH_STORAGE_KEY = "GuardianIsolationPath"; // Key for storage
 
 // Global variable to hold the Native Host port
 let nativeHostPort = null;
@@ -385,7 +385,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Qemu Guardian extension installed or updated.');
+  console.log('Guardian extension installed or updated.');
   // Establish connection on install so it's ready
   getNativeHostPort(); 
 });

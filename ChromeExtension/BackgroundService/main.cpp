@@ -14,16 +14,16 @@ std::map<std::string, PendingFileDetails> g_pendingFileDetails;
 
 // Function to get the directory of the current executable
 std::filesystem::path get_executable_directory() {
-    char buffer[MAX_PATH]; // MAX_PATH is a Windows macro. For Linux/macOS, consider PATH_MAX or platform-specific APIs.
     #ifdef _WIN32
+        char buffer[MAX_PATH]; // MAX_PATH is a Windows macro. For Linux/macOS, consider PATH_MAX or platform-specific APIs.
         GetModuleFileName(NULL, buffer, MAX_PATH);
+        return std::filesystem::path(buffer).parent_path();
     #else
         // For Linux, readlink("/proc/self/exe", ...) or for macOS, _NSGetExecutablePath.
         // For this cross-platform example, we'll simplify and assume current_path() for non-Windows,
         // but in a production app, you'd use proper platform-specific API.
         return std::filesystem::current_path();
     #endif
-    return std::filesystem::path(buffer).parent_path();
 }
 
 // Handler for messages received from the browser via Native Messaging

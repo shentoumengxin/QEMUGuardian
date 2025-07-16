@@ -1,3 +1,0 @@
-Windows Registry Editor Version 5.00
-[HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.nus_dada_group.guardian]
-@="E:\\path\\to\\your\\guardian_manifest.json"

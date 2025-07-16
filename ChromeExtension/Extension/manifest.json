@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "File Scan Interceptor",
+  "name": "Guardian",
   "version": "1.0",
   "description": "Monitors file downloads and sends info to a local scanning service.",
   "permissions": [

@@ -3,15 +3,14 @@ project(Guardian CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_EXTENSIONS OFF) # Prefer strict C++ standard
 
 set(BUILD_SHARED_LIBS ON)
 
-set(CURL_INCLUDE_DIR "E:/somesoftware/curl-8.14.1_2-win64-mingw/include")
+find_package(CURL REQUIRED)
 
-set(CURL_LIBRARY "E:/somesoftware/curl-8.14.1_2-win64-mingw/lib/libcurl.dll.a") # <--- 根据实际文件调整
-
-if(NOT EXISTS ${CURL_LIBRARY})
-    message(FATAL_ERROR "CURL import library file not found at: ${CURL_LIBRARY}. Please check the path and filename.")
+if (NOT CURL_FOUND)
+    message(FATAL_ERROR "cURL library not found. Please install libcurl-dev or libcurl-devel.")
 endif()
 
 set(SOURCES
@@ -27,14 +26,17 @@ target_include_directories(Guardian PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
-target_include_directories(Guardian PRIVATE ${CURL_INCLUDE_DIR})
+target_include_directories(Guardian PRIVATE ${CURL_INCLUDE_DIRS})
+
+target_link_libraries(Guardian PRIVATE
+    ${CURL_LIBRARIES} # <--- Use CURL_LIBRARIES variable
+)
 
 if(WIN32)
     target_link_libraries(Guardian PRIVATE
-        ${CURL_LIBRARY}
         ws2_32
     )
 endif()
 
-# --- 8. 可选：设置输出目录 ---
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# --- 8. Optional: Set Output Directory ---
+# set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
