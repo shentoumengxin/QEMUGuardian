@@ -32,7 +32,6 @@ It is a powerful and easy-to-use security analysis toolkit for Linux executables
 
 ## Further, We Have Released Guardian
 
-<img src="README.assets/Guardian-1752689885402-3.png" alt="Guardian" style="zoom:45%;" />
 
 **Guardian** 🛡️is a chrome plugin that can detect and isolate downloaded ELF files, upload them to a
 server for wrapper analysis, and return the results.
