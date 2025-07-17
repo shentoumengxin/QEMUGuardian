@@ -19,7 +19,7 @@
 
 1. 在 Chrome *扩展程序-管理扩展程序*中，选择“加载已解压的扩展程序”，并选择本目录下的 `Extension` 文件夹，即可加载扩展程序。
 2. 在*扩展程序-管理扩展程序*中，查看本插件 `Guardian` 的 ID。
-3. Linux 用户可以使用 `setup.sh` 脚本自动完成安装过程，Windows 用户可以使用 `setup.bat` 脚本安装。脚本会自动创建后台服务的 guardian_manifest 文件，并将其注册到系统中。
+3. Linux 用户可以使用 `setup.sh` 脚本自动完成安装过程，Windows 用户可以使用 `setup.ps1` 脚本安装。脚本会自动创建后台服务的 guardian_manifest 文件，并将其注册到系统中。
 
 ## 手动安装过程
 

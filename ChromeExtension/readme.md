@@ -21,7 +21,7 @@ Once the plugin is installed, here's what happens when you download a file:
 
 1. In Chrome's **Extensions - Manage Extensions**, select "Load unpacked" and choose the `Extension` folder from this directory to load the plugin.
 2. In **Extensions - Manage Extensions**, find and note the ID for the `Guardian` plugin.
-3. **Linux** users can run the `setup.sh` script to automate the installation. **Windows** users can use the `setup.bat` script. These scripts will automatically create and register the `guardian_manifest` file for the background service.
+3. **Linux** users can run the `setup.sh` script to automate the installation. **Windows** users can run the `setup.ps1` script in Powershell. These scripts will automatically create and register the `guardian_manifest` file for the background service.
 
 -----
 

@@ -42,13 +42,20 @@ echo ""
 echo "--- Backend Service Installation Path ---"
 echo "The Guardian executable will be copied to this location."
 echo "Default path: ${BIN_DIR} (current compiled location)"
-read -p "Enter desired installation path for Guardian (or press Enter for default): " INSTALL_PATH
-if [ -z "$INSTALL_PATH" ]; then
-    INSTALL_PATH="${BIN_DIR}"
-fi
+read -p "Enter installation path for Guardian (or press Enter for default): " INSTALL_PATH_RAW
 
-# Normalize path (remove trailing slash if present)
-INSTALL_PATH=$(echo "$INSTALL_PATH" | sed 's/\/$//')
+if [ -z "$INSTALL_PATH_RAW" ]; then
+    INSTALL_PATH="${BIN_DIR}"
+else
+    # 先替换 ~ 为 $HOME
+    EXPANDED_PATH=$(echo "$INSTALL_PATH_RAW" | sed "s|^~|$HOME|")
+    # 然后使用 realpath
+    if command -v realpath &> /dev/null; then
+        INSTALL_PATH=$(realpath "$EXPANDED_PATH")
+    else
+        INSTALL_PATH=$EXPANDED_PATH
+    fi
+fi
 
 echo "Selected installation path: ${INSTALL_PATH}"
 echo ""

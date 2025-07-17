@@ -76,33 +76,31 @@ function getNativeHostPort() {
               break;
           }
           case "SCAN_RESULT": {
-              const { status, details, filename, notificationId } = response;
+              const { status, details, filename, notificationId, logPath } = response;
               
               // Store the scan status for this notificationId for button logic
               scanResultStatuses.set(notificationId, status);
               
               let title = "Scan Result: " + status.charAt(0).toUpperCase() + status.slice(1);
-              let message = `File "${filename}" (${status}). ${details}`;
+              let message = `File "${filename}". ${details}`;
               let buttons = [];
               let isError = false;
               let requireInteraction = true;
 
               if (status === "clean") {
-                  message += "\nWhat would you like to do with the file?";
                   buttons = [
-                    { title: "Keep" },          // buttonIndex 0
-                    { title: "Restore" } // buttonIndex 1
+                    { title: "Restore" },    // buttonIndex 0
+                    { title: "Keep isolated" }          // buttonIndex 1
+                    
                   ];
               } else if (status === "malicious") {
                   isError = true;
-                  message += "\nIt is highly recommended to delete this file.";
                   buttons = [
                     { title: "Delete" },      // buttonIndex 0
                     { title: "Keep isolated(Risky)" }   // buttonIndex 1
                   ];
               } else if (status === "suspicious") {
                   isError = true;
-                  message += "\nReview this file carefully.";
                   buttons = [
                     { title: "Delete" },      // buttonIndex 0
                     { title: "Keep isolated" },        // buttonIndex 1
@@ -113,7 +111,12 @@ function getNativeHostPort() {
                    requireInteraction = false;
                    buttons = [];
               }
-              console.log(`DEBUG: Buttons array length for status ${status}: ${buttons.length}`);
+          
+              // If a log path is provided, add it to the message
+              if (logPath) {
+                message += `\nReport saved to: ${logPath}`;
+              }
+
               chrome.notifications.clear(notificationId, () => {
                   showNotification(title, message, isError, notificationId, buttons, requireInteraction);
               });
@@ -265,9 +268,9 @@ chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) =
     // Determine the action based on the scan status and button index
     if (scanStatus === "clean") {
       if (buttonIndex === 0) {
-        action = "isolate"; // "Keep in Quarantine"
-      } else if (buttonIndex === 1) {
         action = "restore"; // "Restore to Original Location"
+      } else if (buttonIndex === 1) {
+        action = "isolate"; // "Keep in Quarantine"
       }
     } else if (scanStatus === "malicious") {
       if (buttonIndex === 0) {

@@ -17,8 +17,11 @@
 void initialize_remote_scanner();
 void cleanup_remote_scanner();
 
+std::string save_report_to_Log(const std::string &full_text_report, const std::string &isolated_file_path);
+
 // The main function to perform remote scan and notify the browser
 void perform_remote_scan_and_notify(const PendingFileDetails &pendingFileDetail);
+
 
 struct ParsedScanResult {
     std::string status;       // "clean", "malicious", "suspicious", "pending", "error"

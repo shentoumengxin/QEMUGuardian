@@ -142,8 +142,8 @@ void perform_remote_scan_and_notify(const PendingFileDetails &pendingFileDetail)
         nlohmann::json upload_json = nlohmann::json::parse(upload_response);
         if (upload_json.contains("job_id") && upload_json["job_id"].is_string()) {
             job_id = upload_json["job_id"].get<std::string>();
-            std::cerr << "[Remote Scan Thread] Received job_id: " << job_id << std::endl;
-            result_details = "File uploaded. Waiting for analysis report. Job id: " + job_id;
+            std::cerr << "[Remote Scan Thread] Received job: " << job_id << std::endl;
+            result_details = "Waiting for analysis report. Job: " + job_id;
             scan_result = "pending"; // Or another status for in-progress
         } 
     } catch (const nlohmann::json::parse_error& e) {
@@ -166,7 +166,7 @@ void perform_remote_scan_and_notify(const PendingFileDetails &pendingFileDetail)
     send_message_to_browser(upload_status_response); // Assuming send_message_to_browser is accessible
 
     if (job_id.empty() || scan_result == "error") { // If upload failed or no job_id, stop here
-        std::cerr << "[Remote Scan Thread] No valid job_id obtained or upload failed, skipping report retrieval." << std::endl;
+        std::cerr << "[Remote Scan Thread] No valid job obtained or upload failed, skipping report retrieval." << std::endl;
         return;
     }
 
@@ -174,14 +174,15 @@ void perform_remote_scan_and_notify(const PendingFileDetails &pendingFileDetail)
     ParsedScanResult parsed_result;
     bool report_received = false;
     int retry_count = 0;
-    const int MAX_RETRIES = 5; // Max attempts to get the report
+    const int MAX_RETRIES = 15; // Max attempts to get the report
     const std::chrono::seconds RETRY_INTERVAL(5); // Wait 5 seconds between retries
+    std::string full_text_report = "";
 
     while (!report_received && retry_count < MAX_RETRIES) {
-        std::cerr << "[Remote Scan Thread] Attempting to get report for job_id: " << job_id << " (Attempt " << retry_count + 1 << "/" << MAX_RETRIES << ")" << std::endl;
+        std::cerr << "[Remote Scan Thread] Attempting to get report for job: " << job_id << " (Attempt " << retry_count + 1 << "/" << MAX_RETRIES << ")" << std::endl;
         std::this_thread::sleep_for(RETRY_INTERVAL);
 
-        std::string full_text_report = get_analysis_report_internal(job_id, REPORT_BASE_URL);
+        full_text_report = get_analysis_report_internal(job_id, REPORT_BASE_URL);
         
         if( full_text_report.find("Monitor terminated.") == std::string::npos ) {
             retry_count++;
@@ -198,9 +199,11 @@ void perform_remote_scan_and_notify(const PendingFileDetails &pendingFileDetail)
 
     if (!report_received) {
         scan_result = "error";
-        result_details = "Failed to retrieve analysis report after multiple attempts for job_id: " + job_id;
+        result_details = "Remote server timed out for job: " + job_id;
     }
     
+    
+
     // Send final SCAN_RESULT to browser
     nlohmann::json final_response_to_browser;
     final_response_to_browser["type"] = "SCAN_RESULT";
@@ -211,8 +214,48 @@ void perform_remote_scan_and_notify(const PendingFileDetails &pendingFileDetail)
     final_response_to_browser["isolatedPath"] = isolated_file_path_str;
     final_response_to_browser["notificationId"] = notificationId;
     
+    std::string log_path = save_report_to_Log(full_text_report, isolated_file_path_str);
+    if (!log_path.empty()) {
+        final_response_to_browser["logPath"] = log_path;
+    }
     send_message_to_browser(final_response_to_browser); // Assuming send_message_to_browser is accessible
     std::cerr << "[Remote Scan Thread] Final scan result sent to browser: " << scan_result << std::endl;
+}
+
+/*
+    * Saves the full text report to a log file in the same directory as the isolated file.
+    * The log file will be named after the isolated file with a .log extension.
+    * Returns log path on success, empty on failure.
+*/
+std::string save_report_to_Log(const std::string& full_text_report, const std::string& isolated_file_path) {
+    if (full_text_report.empty() || isolated_file_path.empty()) {
+        std::cerr << "[Save Report] Empty report or isolated file path provided." << std::endl;
+        return "";
+    }
+
+    std::string filename = std::filesystem::path(isolated_file_path).filename().string();
+    std::filesystem::path log_dir_path = std::filesystem::path(isolated_file_path).parent_path() / "logs";
+    std::filesystem::path log_file_path = log_dir_path / (filename + ".log");
+
+    if (!std::filesystem::exists(log_dir_path)) {
+        std::cerr << "[Save Report] Creating log directory: " << log_dir_path << std::endl;
+        std::filesystem::create_directories(log_dir_path);
+    }
+    
+    try {
+        std::ofstream log_file(log_file_path, std::ios::app);
+        if (!log_file.is_open()) {
+            std::cerr << "[Save Report] Failed to open log file for writing: " << log_file_path << std::endl;
+            return "";
+        }
+        log_file << full_text_report << std::endl; // Append the report
+        log_file.close();
+        std::cerr << "[Save Report] Report saved to: " << log_file_path << std::endl;
+        return log_file_path.string();
+    } catch (const std::exception& e) {
+        std::cerr << "[Save Report] Error saving report: " << e.what() << std::endl;
+        return "";
+    }
 }
 
 std::string preprocess_report_string(const std::string& raw_report) {
@@ -264,30 +307,28 @@ ParsedScanResult parse_analysis_report(const std::string& full_text_report, cons
         std::string embedded_json_str = preprocess_report_string(raw_json_str);
         std::cerr << "[Parse Report] Detected embedded JSON string: " << embedded_json_str << std::endl;
 
-        
-
         try {
             nlohmann::json report_json = nlohmann::json::parse(embedded_json_str);
 
             double cvss_level = report_json.value("level", 0.0);
-            std::string description = report_json.value("description", "No description provided.");
-            std::string evidence = report_json.value("evidence", "No evidence provided.");
+            std::string description = report_json.value("description", "No description.");
+            std::string evidence = report_json.value("evidence", "No evidence.");
             
             if (cvss_level >= 9.0) { 
                 result.status = "malicious";
-                result.details = "Critical severity detected! " + description + ". Evidence: " + evidence;
+                result.details = "Critical severit! " + description;
             } else if (cvss_level >= 7.0) { 
                 result.status = "malicious";
-                result.details = "High severity detected! " + description + ". Evidence: " + evidence;
+                result.details = "High severity! " + description;
             } else if (cvss_level >= 4.0) { 
                 result.status = "suspicious";
-                result.details = "Medium severity detected. " + description + ". Evidence: " + evidence;
+                result.details = "Medium severity. " + description;
             } else if (cvss_level > 0.0) { 
                 result.status = "suspicious";
-                result.details = "Low severity detected. " + description + ". Evidence: " + evidence;
+                result.details = "Low severity. " + description;
             } else { 
                 result.status = "clean";
-                result.details = "No critical threats detected. " + description + ". Evidence: " + evidence;
+                result.details = "No critical threats. ";
             }
             
         } catch (const nlohmann::json::parse_error& e) {
@@ -301,10 +342,10 @@ ParsedScanResult parse_analysis_report(const std::string& full_text_report, cons
         }
     } else if (full_text_report.find("Monitor terminated.") != std::string::npos) {
         result.status = "clean";
-        result.details = "No critical threats detected. ";
+        result.details = "No critical threats. ";
     } else {
         result.status = "error";
-        result.details = "Unknown report format or analysis stuck. Raw report (truncated): " + full_text_report.substr(0, std::min((size_t)500, full_text_report.length())) + "..."; 
+        result.details = "Unknown report format. Raw report (truncated): " + full_text_report.substr(0, std::min((size_t)500, full_text_report.length())) + "..."; 
     }
     return result;
 }
