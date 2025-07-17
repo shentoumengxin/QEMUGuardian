@@ -3,5 +3,5 @@
   "description": "Background Guardian Service",
   "path": "Guardian.exe",
   "type": "stdio",
-  "allowed_origins": ["chrome-extension://njkfkkfigpkaohcjdgmiphecanffgkfn/"]
+  "allowed_origins": ["chrome-extension://dnbipjgnjiikbobgkaedcpchdechomle/"]
 }

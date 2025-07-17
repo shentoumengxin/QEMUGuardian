@@ -457,6 +457,7 @@ def run_executable_monitoring(executable_info, args, auto_isolate):
         line = CONTROL_CHAR_RGX.sub('', line)
         try:
             data = json.loads(line)
+            print(f"[DEBUG] Processing JSON data: {data}")
             if not data: return
             
             data['executable'] = executable_info['filename']
