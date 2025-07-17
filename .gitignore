@@ -1,14 +1,2 @@
-
-.DS_Store
-Thumbs.db
-
-.vscode/
-.idea/
-.env
-.pytest_cache/
-.venv/
-__pycache__/
-build/
-*.py[cod]
-guardian_manifest.json
-.reg
+/Readme.assets
+/Readme.assets

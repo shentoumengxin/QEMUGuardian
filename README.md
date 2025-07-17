@@ -1,7 +1,6 @@
-# Welcome to **Qemu-guardian** 🛡️
+# Welcome to **qemu-guardian** 🛡️
 
-## Wrapper
-
+**Qemu-guardian** is a powerful and easy-to-use security analysis toolkit for Linux executables across multiple CPU architectures. With qemu-guardian, you can quickly analyze, monitor, and assess the security risks of untrusted binaries—even if they are compiled for platforms different from your host. 🚀
 ![8f5b38f925978fa06394d5bbc0e125b](README.assets/8f5b38f925978fa06394d5bbc0e125b-1752689618124-3.png)
 
 The **Wrapper** leverage eBPF to monitor QEMU-user, then distribute the captured syscalls to the analyzers for analysis.
@@ -26,12 +25,15 @@ It is a powerful and easy-to-use security analysis toolkit for Linux executables
    View security findings instantly through a convenient GUI.
 
 > **Note:** If you are interested in this project and would like to contribute, feel free to contact us or check the README in the [`Wrapper`](./Wrapper) folder.  
-> We welcome your help in developing new analyzers!
+> 
+We welcome your help in developing new analyzers!
+## Why Use qemu-guardian?
 
+Whether you’re a security researcher, reverse engineer, or developer, **qemu-guardian** makes it easy to identify risky behavior and vulnerabilities before running untrusted code on real hardware. Analyze cross-architecture malware, firmware, or any Linux binary safely and efficiently.
 
+------
 
-## Further, We Have Released Guardian
-
+## Get Started 🚀
 
 **Guardian** 🛡️is a chrome plugin that can detect and isolate downloaded ELF files, upload them to a
 server for wrapper analysis, and return the results.
@@ -62,21 +64,6 @@ This plugin will automatically communicate with our sever, then give you the vul
 
 1. **Go to the  [`Wrapper`](./Wrapper) directory in this repository.**
 2. **Follow the instructions in the README to install dependencies and start analyzing your executables!**
-3. **You can also go to [`ChromeExtension`](./ChromeExtension) directory to get a File Scan Interceptor and Guardian. It can detect the ELF download from your browser and send to out demo-Server automatically, then give you a vulnerability report.**
-
----
-
-## In the end :)
-
-This project was developed as part of the NUS Summer Workshop.  
-Special thanks to our [Professor Hugh Anderson](https://smcnus.org/profile/hugh-anderson/) for his guidance and support.
-
-✨ **Download Qemu-Guardian and get started today!**
-
-<br/>
-
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-
----
-
-**Licensed under the [Apache License 2.0](LICENSE).**
+3. **If you are windows or linux user, you can go to 'ChromeExtension' to get a File Scan Interceptor and Guadian. It can detect the ELF download from your browser and send to out demo-Server automatically.**
+Ready to make your analysis smarter and safer?
+ **Download qemu-guardian and get started today!** ✨
