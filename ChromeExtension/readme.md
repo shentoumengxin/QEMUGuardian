@@ -1,31 +1,135 @@
-# Chrome 插件实现
+# Chrome Plugin Implementation
 
-本插件实现了拦截下载并检测文件漏洞的功能。
+This plugin intercepts downloads to detect file vulnerabilities.
 
-## 使用过程
+## How to Use It
 
-具体为，当安装好插件后，用户下载任意文件时，插件会有以下行为：
+Once the plugin is installed, here's what happens when you download a file:
 
-1. 自动拦截下载请求，询问是否对文件进行隔离检查。
-2. 若选择“yes”，则插件会先将文件移动到隐藏的隔离目录，随后自动将插件发送到远端服务器 [http://xxbaicz.online:8081/analyze/](http://xxbaicz.online:8081/analyze/) 进行检查。
-3. 检查完成后，插件返回检查结果，并根据检查结果提供给用户不同选项：
-   - Keep isolated: 保持隔离
-   - Restore: 恢复到原下载目录
-   - Delete: 删除文件
-4. 点击浏览器右上角的插件图标，可以修改隔离目录并自动移动所有隔离文件。
-5. 点击浏览器右上角的插件图标，输入文件地址，可以手动将文件发送到远端服务器进行检查。
+1. The plugin automatically intercepts the download request and asks if you want to perform an isolation check on the file.
+2. If you choose "yes," the plugin first moves the file to a hidden isolation directory. Then, it automatically sends the file to the remote server at [http://xxbaicz.online:8081/analyze/](http://xxbaicz.online:8081/analyze/) for inspection.
+    After the check, the plugin returns the results and gives you several options:
+      * **Keep isolated**: Leaves the file in the isolation directory.
+      * **Restore**: Moves the file back to its original download location.
+      * **Delete**: Permanently removes the file.
+3. Clicking the plugin icon in your browser's top-right corner lets you change the isolation directory and automatically move all currently isolated files to the new location.
+4. You can also manually send a file for inspection by clicking the plugin icon and entering the file's path.
 
-## 安装过程
+-----
 
-1. 本目录下的 `Extension` 文件夹即为已解压的扩展程序，在 Chrome *扩展程序-管理扩展程序*中，选择“加载已解压的扩展程序”，并选择该 `Extension` 文件夹，即可加载扩展程序。
-2. 在*扩展程序-管理扩展程序*中，查看本插件 `File Scan Interceptor` 的 ID，并修改本目录下的 `guardian_manifest.json` 中的 `allowed_origins` 字段为该 ID。
-3. 在 `.reg` 中，修改绝对路径指向 `guardian_manifest.json` 文件，然后双击运行该 `.reg` 文件，添加注册表项。
-4. 将 `guardian_manifest.json` 和 `Guardian.exe` 放置在同一目录下，此时该插件应该已经可以使用。
-5. 若想自行编译后台服务 `Guardian.exe`，若是使用 `MinGW32-make`，可在 `Guardian` 目录下运行：
+## Automatic Installation
 
-     ```bash
-     > mkdir build
-     > cd ./build
-     > cmake .. -G "MinGW Makefiles"
-     > cmake --build .
-     ```
+1. In Chrome's **Extensions - Manage Extensions**, select "Load unpacked" and choose the `Extension` folder from this directory to load the plugin.
+2. In **Extensions - Manage Extensions**, find and note the ID for the `Guardian` plugin.
+3. **Linux** users can run the `setup.sh` script to automate the installation. **Windows** users can use the `setup.bat` script. These scripts will automatically create and register the `guardian_manifest` file for the background service.
+
+-----
+
+## Manual Installation
+
+### For Windows Users
+
+1. The `Extension` folder in this directory holds the unpacked extension. In Chrome's **Extensions - Manage Extensions**, choose "Load unpacked" and select this `Extension` folder to load it.
+
+2. In **Extensions - Manage Extensions**, note the ID for the `Guardian` plugin.
+
+3. Locate the background service program at `bin/windows/Guardian.exe`. In the *same directory*, create a file named `guardian_manifest.json` with the following content:
+
+    ```json
+    {
+      "name": "com.nus_dada_group.guardian",
+      "description": "Background Guardian Service",
+      "path": "Guardian.exe",
+      "type": "stdio",
+      "allowed_origins": ["chrome-extension://YOUR_EXTENSION_ID/"]
+    }
+    ```
+
+    **Replace `YOUR_EXTENSION_ID` with the actual plugin ID** you obtained in the previous step.
+
+4. Create a `.reg` file with the following content:
+
+    ```reg
+    Windows Registry Editor Version 5.00
+
+    [HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.nus_dada_group.guardian]
+    @="C:\\absolute\\path\\to\\guardian_manifest.json"
+    ```
+
+    **Replace `C:\\absolute\\path\\to\\guardian_manifest.json` with the full, absolute path to your `guardian_manifest.json` file.** Double-click this `.reg` file to add the registry entry. The plugin should now be functional.
+
+5. If you want to **compile the background service `Guardian.exe` yourself** using `MinGW32-make`, navigate to the `BackgroundService` directory in your terminal and run:
+
+    ```powershell
+    > cd ./BackgroundService
+    > mkdir build
+    > cd ./build
+    > cmake .. -G "MinGW Makefiles"
+    > cmake --build .
+    ```
+
+### For Linux Users
+
+1. The `Extension` folder in this directory holds the unpacked extension. In Chrome's **Extensions - Manage Extensions**, choose "Load unpacked" and select this `Extension` folder to load it.
+
+2. In **Extensions - Manage Extensions**, note the ID for the `Guardian` plugin.
+
+3. Locate the background service program at `bin/linux/Guardian`. In the *same directory*, create a file named `guardian_manifest.json` with the following content:
+
+    ```json
+    {
+      "name": "com.nus_dada_group.guardian",
+      "description": "Background Guardian Service",
+      "path": "/Absolute/Path/To/Guardian",
+      "type": "stdio",
+      "allowed_origins": ["chrome-extension://YOUR_EXTENSION_ID/"]
+    }
+    ```
+
+    **Replace `YOUR_EXTENSION_ID` with the actual plugin ID** you obtained in the previous step.
+
+4. Choose your installation scope:
+
+      * For **current user only**: Place the `guardian_manifest.json` file in `~/.config/google-chrome/NativeMessagingHosts/`.
+      * For **all users**: Place the `guardian_manifest.json` file in `/etc/opt/chrome/native-messaging-hosts/`.
+
+    **Important:** Remember to modify the `path` field in `guardian_manifest.json` to point to the **absolute path** of your `Guardian` executable. The default isolation folder will also be placed in the same directory as `Guardian`. The plugin should now be functional.
+
+5. If you want to **compile the background service yourself**, navigate to the `BackgroundService` directory in your terminal and run:
+
+    ```bash
+    > cd ./BackgroundService
+    > mkdir build
+    > cd ./build
+    > cmake ..
+    > cmake --build .
+    ```
+
+### For macOS Users
+
+1. The `Extension` folder in this directory holds the unpacked extension. In Chrome's **Extensions - Manage Extensions**, choose "Load unpacked" and select this `Extension` folder to load it.
+
+2. In **Extensions - Manage Extensions**, note the ID for the `Guardian` plugin.
+
+3. A macOS version of the background service program has not yet been pre-compiled. If you need to use it, please compile the code in the `BackgroundService` directory yourself. After compilation, place the generated executable in `bin/macos`.
+
+4. If the background service program is `bin/macos/Guardian`, in the *same directory*, create a file named `guardian_manifest.json` with the following content:
+
+    ```json
+    {
+      "name": "com.nus_dada_group.guardian",
+      "description": "Background Guardian Service",
+      "path": "/Absolute/Path/To/Guardian",
+      "type": "stdio",
+      "allowed_origins": ["chrome-extension://YOUR_EXTENSION_ID/"]
+    }
+    ```
+
+    **Replace `YOUR_EXTENSION_ID` with the actual plugin ID** you obtained in the previous step.
+
+5. Choose your installation scope:
+
+      * For **current user only**: Place the `guardian_manifest.json` file in `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`.
+      * For **all users**: Place the `guardian_manifest.json` file in `/Library/Application Support/Google/Chrome/NativeMessagingHosts/`.
+
+    **Important:** Remember to modify the `path` field in `guardian_manifest.json` to point to the **absolute path** of your `Guardian` executable. The default isolation folder will also be placed in the same directory as `Guardian`. The plugin should now be functional.

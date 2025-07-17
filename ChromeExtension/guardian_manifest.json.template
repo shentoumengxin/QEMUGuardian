@@ -1,0 +1,9 @@
+{
+  "name": "com.nus_dada_group.guardian",
+  "description": "Background Guardian Service",
+  "path": "YOUR_GUARDIAN_EXECUTABLE_PATH_PLACEHOLDER",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://YOUR_EXTENSION_ID_PLACEHOLDER/"
+  ]
+}
