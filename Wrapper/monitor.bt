@@ -72,18 +72,7 @@ tracepoint:syscalls:sys_enter_mprotect
            ($p & 4)  ? 1 : 0);  // PROT_EXEC
 }
 
-// ─── 3) Monitor madvise() calls ────────────────────────────────────────────
-tracepoint:syscalls:sys_enter_mprotect
-/ @monitored[pid] /
-{
-    $p = args->prot;
-    // 分别输出三个标志位，1 表示设置了该权限，0 表示没有
-    printf("{\"ts\":%llu,\"event\":\"MPROTECT\",\"pid\":%d,\"read\":%d,\"write\":%d,\"exec\":%d}\n",
-           nsecs/1000000000ULL, pid,
-           ($p & 1)  ? 1 : 0,   // PROT_READ
-           ($p & 2)  ? 1 : 0,   // PROT_WRITE
-           ($p & 4)  ? 1 : 0);  // PROT_EXEC
-}
+// (madvise probe placeholder if needed in future)
 
 
 // Capture read() syscalls in monitored processes (print buffer content)

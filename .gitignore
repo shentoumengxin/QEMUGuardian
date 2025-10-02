@@ -11,4 +11,6 @@ build/
 *.py[cod]
 guardian_manifest.json
 .reg
-/Readme.assets
+.history
+_pycache_/
+report

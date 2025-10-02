@@ -1,20 +1,15 @@
 #!/usr/bin/env -S python3
 
-import subprocess
-import json
-import os
-import argparse
-import signal
-from concurrent.futures import ThreadPoolExecutor
-import re
-from collections import deque
-import threading
-import uuid
-import time
-import errno
+import subprocess, json, os, argparse, signal, re, threading, uuid, time, errno, select, resource
 from pathlib import Path
-import resource
-import select
+from concurrent.futures import ThreadPoolExecutor
+
+# Optional docker integration
+try:
+    from docker_integration import DockerRunner  # type: ignore
+    _DOCKER_OK = True
+except Exception:
+    _DOCKER_OK = False
 REPORT_GUI_PROCESS = None
 seen_pids = set()       # 只追加不弹出，保留整个监控周期内见过的 PID
 hidden_failures = set()    # 记录那些 kill 失败的高危 PID
@@ -52,64 +47,66 @@ def setup_cgroup(cgroup_name, memory_limit="2G", cpu_quota=200000, pids_max=1000
       - 失败时返回 None
     """
     global CGROUP_PATH
-
-    # 1) 查 unified v2 挂载点
+    # Try cgroup v2 first
     v2_mount = None
-    with open("/proc/mounts") as m:
-        for line in m:
-            dev, mnt, fs, *_ = line.split()
-            if fs == "cgroup2":
-                v2_mount = mnt
-                break
+    try:
+        with open("/proc/mounts") as m:
+            for line in m:
+                parts = line.split()
+                if len(parts) >= 3 and parts[2] == "cgroup2":
+                    v2_mount = parts[1]
+                    break
+    except Exception as e:
+        print(f"[CGROUP] Failed reading /proc/mounts: {e}")
 
     if v2_mount:
-        # 尝试开启 subtree_control
+        path = f"{v2_mount}/{cgroup_name}"
         try:
-            ctrls = open(f"{v2_mount}/cgroup.controllers").read().split()
-            want = [f"+{c}" for c in ("memory","cpu","pids") if c in ctrls]
-            if want:
-                open(f"{v2_mount}/cgroup.subtree_control", "w").write(" ".join(want))
-            # 创建子 cgroup
-            CGROUP_PATH = f"{v2_mount}/{cgroup_name}"
-            os.makedirs(CGROUP_PATH, exist_ok=True)
-            # 写限制
-            open(f"{CGROUP_PATH}/memory.max", "w").write(memory_limit)
-            open(f"{CGROUP_PATH}/cpu.max",    "w").write(f"{cpu_quota} 100000")
-            open(f"{CGROUP_PATH}/pids.max",   "w").write(str(pids_max))
-            print(f"[CGROUP:v2] Created {CGROUP_PATH}, limits set")
-            return CGROUP_PATH
-        except PermissionError:
-            print("[CGROUP] unified v2 read-only or no permission, falling back to v1")
-        except FileNotFoundError:
-            print("[CGROUP] unified v2 missing control files, falling back to v1")
+            os.makedirs(path, exist_ok=True)
+            # Set limits if possible (ignore failures silently)
+            def _w(p, val):
+                try:
+                    open(p, 'w').write(val)
+                except Exception:
+                    pass
+            # memory
+            _w(f"{path}/memory.max", memory_limit)
+            # cpu (quota/period) - approximate: use 100000 period
+            if cpu_quota > 0:
+                _w(f"{path}/cpu.max", f"{cpu_quota} 100000")
+            # pids
+            _w(f"{path}/pids.max", str(pids_max))
+            CGROUP_PATH = path
+            print(f"[CGROUP:v2] Created {path}")
+            return path
         except Exception as e:
-            print(f"[CGROUP] v2 setup error: {e}, falling back to v1")
+            print(f"[CGROUP:v2] Failed to setup {path}: {e}; falling back to v1")
 
-    # 2) 降级到 cgroup v1：分别在 /sys/fs/cgroup/{memory,cpu,pids} 下创建子 cgroup
+    # Fallback to cgroup v1 controllers
     v1_paths = {}
-    for ctrl, limit_file, val in [
+    controllers = [
         ("memory", "memory.limit_in_bytes", memory_limit),
         ("cpu",    "cpu.cfs_quota_us",      str(cpu_quota)),
         ("pids",   "pids.max",              str(pids_max)),
-    ]:
+    ]
+    for ctrl, limit_file, val in controllers:
         base = f"/sys/fs/cgroup/{ctrl}"
         if not os.path.isdir(base):
-            print(f"[CGROUP:v1] {ctrl} not mounted, skipping")
             continue
         path = f"{base}/{cgroup_name}"
         try:
             os.makedirs(path, exist_ok=True)
-            open(f"{path}/{limit_file}", "w").write(val)
-            print(f"[CGROUP:v1] {ctrl} cgroup at {path}, set {limit_file}={val}")
+            open(f"{path}/{limit_file}", 'w').write(val)
             v1_paths[ctrl] = path
+            print(f"[CGROUP:v1] {ctrl} -> {path} ({limit_file}={val})")
         except Exception as e:
-            print(f"[CGROUP:v1] Failed to setup {ctrl} at {path}: {e}")
+            print(f"[CGROUP:v1] Failed to setup {ctrl}: {e}")
 
     if v1_paths:
         CGROUP_PATH = v1_paths
         return v1_paths
 
-    print("[CGROUP] No cgroup could be configured")
+    print("[CGROUP] Could not configure any cgroup")
     return None
 
 def add_process_to_cgroup(pid):
@@ -592,6 +589,332 @@ def run_executable_monitoring(executable_info, args, auto_isolate):
                 CGROUP_PATH = None
 
 
+_CACHED_CGROUPID_SUPPORT = None
+
+def _detect_cgroupid_support() -> bool:
+    """Detect if current bpftrace supports the 'cgroupid' builtin.
+    Old logic falsely returned False because bpftrace never exits on its own.
+    New strategy: spawn a tiny bpftrace program referencing cgroupid, wait until it prints 'Attaching',
+    then terminate. If we see a syntax error line -> unsupported.
+    Cached after first determination.
+    """
+    global _CACHED_CGROUPID_SUPPORT
+    if _CACHED_CGROUPID_SUPPORT is not None:
+        return _CACHED_CGROUPID_SUPPORT
+    # Must be root (unless user configured capabilities) – if not, treat as unsupported so we fallback gracefully
+    if os.geteuid() != 0:
+        _CACHED_CGROUPID_SUPPORT = False
+        return _CACHED_CGROUPID_SUPPORT
+    try:
+        proc = subprocess.Popen(
+            ['bpftrace', '-e', 'tracepoint:syscalls:sys_enter_execve / cgroupid >= 0 / { exit(); }'],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace'
+        )
+        supported = False
+        start = time.time()
+        # Read a few lines (up to 1.5s) looking for either attach or syntax error
+        while time.time() - start < 1.5 and proc.poll() is None:
+            if not proc.stdout:
+                break
+            if select.select([proc.stdout], [], [], 0.3)[0]:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                l = line.lower()
+                if 'syntax error' in l or 'unknown' in l:
+                    supported = False
+                    break
+                if 'attaching' in l:
+                    # If it managed to attach, parsing succeeded; execve may not happen before timeout
+                    supported = True
+        # Ensure process terminated
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=0.5)
+            except Exception:
+                proc.kill()
+        _CACHED_CGROUPID_SUPPORT = supported
+    except Exception:
+        _CACHED_CGROUPID_SUPPORT = False
+    return _CACHED_CGROUPID_SUPPORT
+
+def _generate_docker_monitor_script(container_pid: int, target_comm: str, want_cgroup: bool, force_cgroup: bool) -> str:
+    """Generate docker monitor script.
+    If want_cgroup and bpftrace supports cgroupid builtin and cgroup inode resolves -> use cgroup filter.
+    Else fallback to pid + prefix strategy.
+    """
+    base_script = Path('monitor.bt').read_text(encoding='utf-8')
+    prefix = target_comm[:15]
+    use_cgroup = False
+    cgid = None
+    if (want_cgroup or force_cgroup) and container_pid > 0 and (force_cgroup or _detect_cgroupid_support()):
+        # Try resolve cgroup v2 inode
+        try:
+            with open(f"/proc/{container_pid}/cgroup", 'r') as f:
+                for line in f:
+                    parts = line.strip().split(':')
+                    if len(parts) == 3 and parts[0] == '0':
+                        rel = parts[2].lstrip('/')
+                        cpath = f"/sys/fs/cgroup/{rel}"
+                        if os.path.isdir(cpath):
+                            try:
+                                cgid = os.stat(cpath).st_ino
+                                use_cgroup = cgid is not None
+                            except Exception:
+                                use_cgroup = False
+                        break
+        except Exception:
+            use_cgroup = False
+
+    injected: list[str] = ["// === Dynamic docker monitor script ==="]
+    if use_cgroup and cgid is not None:
+        print(f"[DOCKER][CGROUP] Using cgroupid filter (inode={cgid}) for container PID {container_pid}")
+        injected += [
+            f"// cgroup mode enabled (inode {cgid})",
+            f"#define TARGET_CGID {cgid}",
+            # Exec mark + track
+            "tracepoint:sched:sched_process_exec / cgroupid == TARGET_CGID / { @monitored[pid]=1; printf(\"{\\\"ts\\\":%llu,\\\"event\\\":\\\"TRACK_DOCKER_BIN\\\",\\\"pid\\\":%d,\\\"bin\\\":\\\"%s\\\"}\\n\", nsecs/1000000000ULL, pid, comm); }",
+            # Process tree expansion (child inherits monitoring if parent already monitored)
+            "tracepoint:sched:sched_process_fork / @monitored[args->parent_pid] / { @monitored[args->child_pid]=1; }",
+            # Early syscall auto mark
+            "tracepoint:syscalls:sys_enter_execve   / cgroupid == TARGET_CGID && !@monitored[pid] / { @monitored[pid]=1; }",
+            "tracepoint:syscalls:sys_enter_write    / cgroupid == TARGET_CGID && !@monitored[pid] / { @monitored[pid]=1; }",
+            "tracepoint:syscalls:sys_enter_read     / cgroupid == TARGET_CGID && !@monitored[pid] / { @monitored[pid]=1; }",
+            "tracepoint:syscalls:sys_enter_setuid   / cgroupid == TARGET_CGID && !@monitored[pid] / { @monitored[pid]=1; }",
+            "tracepoint:syscalls:sys_enter_mprotect / cgroupid == TARGET_CGID && !@monitored[pid] / { @monitored[pid]=1; }",
+            "",
+        ]
+    else:
+        reason = []
+        if not want_cgroup and not force_cgroup:
+            reason.append('disabled by flag')
+        elif container_pid <= 0:
+            reason.append('no container pid')
+        elif os.geteuid() != 0 and not (force_cgroup and _detect_cgroupid_support()):
+            reason.append('need root')
+        elif not (force_cgroup or _detect_cgroupid_support()):
+            reason.append('bpftrace lacks cgroupid builtin')
+        else:
+            reason.append('inode resolve failed')
+        print(f"[DOCKER][CGROUP] Fallback to prefix mode ({'; '.join(reason)})")
+        injected += [
+            f"BEGIN {{ @monitored[{container_pid}] = 1; }}",
+            f"// fallback prefix '{prefix}' (cgroup mode {'requested but unsupported' if want_cgroup else 'disabled'})",
+            "tracepoint:sched:sched_process_exec / strncmp(comm, \"" + prefix + "\", " + str(len(prefix)) + ") == 0 / { @monitored[pid]=1; printf(\"{\\\"ts\\\":%llu,\\\"event\\\":\\\"TRACK_DOCKER_BIN\\\",\\\"pid\\\":%d,\\\"bin\\\":\\\"%s\\\"}\\n\", nsecs/1000000000ULL, pid, comm); }",
+            # Process tree expansion: any forked child of a monitored parent becomes monitored
+            "tracepoint:sched:sched_process_fork / @monitored[args->parent_pid] / { @monitored[args->child_pid]=1; }",
+            "tracepoint:syscalls:sys_enter_execve   / strncmp(comm, \"" + prefix + "\", " + str(len(prefix)) + ") == 0 && !@monitored[pid] / { @monitored[pid]=1; }",
+            "tracepoint:syscalls:sys_enter_write    / strncmp(comm, \"" + prefix + "\", " + str(len(prefix)) + ") == 0 && !@monitored[pid] / { @monitored[pid]=1; }",
+            "tracepoint:syscalls:sys_enter_read     / strncmp(comm, \"" + prefix + "\", " + str(len(prefix)) + ") == 0 && !@monitored[pid] / { @monitored[pid]=1; }",
+            "tracepoint:syscalls:sys_enter_setuid   / strncmp(comm, \"" + prefix + "\", " + str(len(prefix)) + ") == 0 && !@monitored[pid] / { @monitored[pid]=1; }",
+            "tracepoint:syscalls:sys_enter_mprotect / strncmp(comm, \"" + prefix + "\", " + str(len(prefix)) + ") == 0 && !@monitored[pid] / { @monitored[pid]=1; }",
+            "",
+        ]
+    script_text = "\n".join(injected) + "\n" + base_script
+    tmp_path = Path(f"/tmp/monitor_docker_{container_pid}.bt")
+    tmp_path.write_text(script_text, encoding='utf-8')
+    return str(tmp_path)
+
+
+def run_executable_monitoring_docker(executable_info, args, auto_isolate, docker_runner: DockerRunner):
+    """Docker mode: run binary inside container & monitor both qemu- (if any) and container PID."""
+    filename = executable_info['filename']
+    print(f"\n{'='*80}\n[DOCKER] Starting analysis of: {filename}\n[DOCKER] Architecture: {executable_info['architecture']}\n{'='*80}")
+    container = None
+    container_pid = 0
+    exec_deferred = False
+    staged_mode = getattr(args, 'docker_staged', True)
+    force_qemu = getattr(args, 'docker_force_qemu', False)
+
+    # Always try staged unless user disabled with --no-docker-staged
+    if staged_mode:
+        print("[DOCKER] Staged mode: launching idle container first")
+        container = docker_runner.start_staged_container(executable_info['architecture'])
+        if container:
+            try:
+                container.reload(); container_pid = int(container.attrs.get('State', {}).get('Pid', 0))
+            except Exception:
+                container_pid = 0
+            if not container_pid:
+                print("[DOCKER] Warning: staged container PID unresolved; seeding with 0")
+            exec_deferred = True
+        else:
+            print("[DOCKER] Staged start failed; fallback to direct run mode")
+            staged_mode = False
+    if not staged_mode:
+        run_info = docker_runner.run_binary(executable_info['filepath'], executable_info['architecture'])
+        if not run_info:
+            print("[DOCKER] Failed to start container; skipping")
+            return
+        container = run_info['container']
+        container_pid = run_info.get('pid', 0)
+        if not container_pid:
+            print("[DOCKER] Could not determine container PID (monitor may be incomplete)")
+
+    # Create dynamic monitor script using container PID (0 tolerated)
+    # Determine cgroup usage intention
+    want_cgroup = not getattr(args, 'docker_no_cgroup', False)
+    force_cgroup = getattr(args, 'docker_force_cgroup', False)
+    monitor_script = _generate_docker_monitor_script(container_pid, filename[:12], want_cgroup=want_cgroup, force_cgroup=force_cgroup)
+    try:
+        monitor_process = subprocess.Popen(
+            ['bpftrace', monitor_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace'
+        )
+    except Exception as e:
+        print(f"[DOCKER] Failed to launch bpftrace: {e}")
+        docker_runner.cleanup(container)
+        return
+
+    # If staged, wait until we see the "Attaching" line before executing target binary
+    attach_seen = False
+    if staged_mode:
+        attach_deadline = time.time() + 5
+        prebuffer = []
+        while time.time() < attach_deadline and not attach_seen and monitor_process.stdout:
+            r, _, _ = select.select([monitor_process.stdout], [], [], 0.3)
+            if not r:
+                continue
+            line_raw = monitor_process.stdout.readline()
+            if line_raw == '':
+                break
+            prebuffer.append(line_raw)
+            if 'Attaching ' in line_raw:
+                attach_seen = True
+        # Emit prebuffered lines
+        for l in prebuffer:
+            print(f"[BPF-RAW] {l.strip()}")
+        if not attach_seen:
+            print('[DOCKER] Warning: did not confirm bpftrace attach before exec; proceeding anyway')
+
+    def _process_line(line, executor):
+        try:
+            data = json.loads(re.sub(r'[\x00-\x1f]+', '', line))
+        except json.JSONDecodeError:
+            return
+        data['executable'] = filename
+        event_type, evt_type = data.get('event'), data.get('evt')
+        target_analyzers = EVENT_ANALYZER_MAP.get(event_type, []) + EVT_ANALYZER_MAP.get(evt_type, [])
+        if not target_analyzers:
+            return
+        futures = [executor.submit(run_analyzer, script, data) for script in target_analyzers]
+        results = [f.result() for f in futures if f.result()]
+        report = generate_report(results, filename)
+        if report:
+            if REPORT_GUI_PROCESS and REPORT_GUI_PROCESS.poll() is None:
+                try:
+                    REPORT_GUI_PROCESS.stdin.write(report + "\n" + "="*50 + "\n")
+                    REPORT_GUI_PROCESS.stdin.flush()
+                except Exception:
+                    print(report); print("="*50)
+            else:
+                print(report); print("="*50)
+
+    start_time = time.time()
+    timeout = args.timeout
+    buffer = ""; brace = 0
+    exec_finished = False
+    exec_exit_code = None
+    exec_output = ''
+    grace_after_exec = 1.5  # seconds to keep draining after exec
+    exec_end_time = None
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        try:
+            # If staged: launch exec in background so we don't miss very short-lived syscalls
+            exec_thread = None
+            exec_state = {"done": False, "code": None, "output": ""}
+            if exec_deferred and container is not None:
+                print("[DOCKER] Executing target binary inside staged container (async thread)...")
+                def _run_exec():
+                    nonlocal exec_end_time, exec_exit_code, exec_output, exec_finished
+                    res = docker_runner.exec_binary_in_container(
+                        container,
+                        executable_info['filepath'],
+                        force_qemu=force_qemu,
+                        arch_info=executable_info['architecture']
+                    ) or (-1, "")
+                    exec_exit_code_local, exec_output_local = res
+                    exec_exit_code = exec_exit_code_local
+                    exec_output = exec_output_local
+                    exec_finished = True
+                    exec_end_time = time.time()
+                    exec_state["done"] = True
+                    exec_state["code"] = exec_exit_code_local
+                    exec_state["output"] = exec_output_local
+                exec_thread = threading.Thread(target=_run_exec, daemon=True)
+                exec_thread.start()
+            while True:
+                now = time.time()
+                # Global timeout
+                if now - start_time > timeout:
+                    print(f"[DOCKER] Timeout for {filename}")
+                    break
+                # Grace period after exec
+                if exec_finished and exec_end_time and (now - exec_end_time) > grace_after_exec:
+                    break
+                r, _, _ = select.select([monitor_process.stdout], [], [], 0.6)
+                if not r:
+                    # check if container finished and monitor quiet
+                    if monitor_process.poll() is not None:
+                        break
+                    continue
+                line_raw = monitor_process.stdout.readline()
+                if line_raw:
+                    print(f"[BPF-RAW] {line_raw.strip()}")
+                if line_raw == "":
+                    break
+                chunk = line_raw
+                for ch in chunk:
+                    if ch == '{':
+                        if brace == 0:
+                            buffer = ''
+                        brace += 1
+                    if brace > 0:
+                        buffer += ch
+                    if ch == '}':
+                        brace -= 1
+                        if brace == 0:
+                            _process_line(buffer, executor)
+                            buffer = ''
+        finally:
+            # Join exec thread if still running
+            try:
+                if 'exec_thread' in locals() and exec_thread and exec_thread.is_alive():
+                    exec_thread.join(timeout=0.2)
+            except Exception:
+                pass
+            # In staged mode the container is still sleeping; stop it explicitly after grace
+            if staged_mode and container is not None:
+                try:
+                    container.stop(timeout=2)
+                except Exception:
+                    pass
+            if staged_mode:
+                code = exec_exit_code if exec_exit_code is not None else -1
+                logs = exec_output
+            else:
+                code, logs = docker_runner.wait(container, timeout=timeout)
+            print(f"[DOCKER] Container exit code: {code}")
+            if logs and logs.strip():
+                print("[DOCKER] Logs:\n" + logs.rstrip())
+            if container is not None:
+                docker_runner.cleanup(container)
+            if monitor_process and monitor_process.poll() is None:
+                monitor_process.terminate()
+                try:
+                    monitor_process.wait(timeout=2)
+                except Exception:
+                    monitor_process.kill()
+            # remove temp script
+            try:
+                os.remove(monitor_script)
+            except OSError:
+                pass
 
 
 
@@ -601,243 +924,6 @@ def run_executable_monitoring(executable_info, args, auto_isolate):
 
 
 
-
-
-
-
-
-
-
-# def run_executable_monitoring(executable_info, args, auto_isolate, monitor_process):
-#     """监控单个可执行文件的运行"""
-#     global QEMU_PROCESS, CGROUP_PATH, CGROUP_NAME, CURRENT_EXECUTABLE, seen_pids, hidden_failures
-#     global EVENT_ANALYZER_MAP, EVT_ANALYZER_MAP, REPORT_GUI_PROCESS
-    
-#     # 重置状态
-#     QEMU_PROCESS = None
-#     seen_pids = set()
-#     hidden_failures = set()
-#     CURRENT_EXECUTABLE = executable_info['filename']
-    
-#     print(f"\n{'='*80}")
-#     print(f"[MONITOR] Starting analysis of: {executable_info['filename']}")
-#     print(f"[MONITOR] Architecture: {executable_info['architecture']}")
-#     print(f"[MONITOR] Using QEMU: {executable_info['qemu_command']}")
-#     print(f"{'='*80}\n")
-    
-#     # 构建 QEMU 命令
-#     qemu_cmd = [executable_info['qemu_command'], executable_info['filepath']]
-    
-#     # 如果启用了 cgroup，为每个可执行文件创建新的 cgroup
-#     if args.cgroup:
-#         # 清理之前的 cgroup
-#         if CGROUP_PATH:
-#             cleanup_cgroup()
-#             CGROUP_PATH = None
-        
-#         # 创建新的 cgroup
-#         CGROUP_NAME = f"qemu_monitor_{executable_info['filename']}_{uuid.uuid4().hex[:8]}"
-#         cgroup_path = setup_cgroup(
-#             CGROUP_NAME,
-#             memory_limit=args.memory_limit,
-#             cpu_quota=args.cpu_quota,
-#             pids_max=args.pids_max
-#         )
-        
-#         if not cgroup_path:
-#             print(f"[ERROR] Failed to setup cgroup for {executable_info['filename']}, skipping")
-#             return
-        
-#         # 启动 QEMU
-#         qemu_process = launch_qemu_in_cgroup(qemu_cmd, cgroup_path, args.fork_max)
-#         if not qemu_process:
-#             print(f"[ERROR] Failed to launch QEMU for {executable_info['filename']}")
-#             cleanup_cgroup()
-#             return
-        
-#         # 启动资源监控线程
-#         monitor_stop = threading.Event()
-#         def monitor_thread():
-#             while not monitor_stop.is_set() and QEMU_PROCESS and QEMU_PROCESS.poll() is None:
-#                 if monitor_cgroup_resources():
-#                     print("[ALERT] Abnormal resource usage detected!")
-#                     terminate_cgroup()
-#                     break
-#                 monitor_stop.wait(5)
-        
-#         monitor = threading.Thread(target=monitor_thread, daemon=True)
-#         monitor.start()
-#     else:
-#         # 不使用 cgroup，直接启动
-#         try:
-#             QEMU_PROCESS = subprocess.Popen(
-#                 qemu_cmd,
-#                 stdout=None,
-#                 stderr=None
-#             )
-#             print(f"[QEMU] Started QEMU with PID: {QEMU_PROCESS.pid}")
-#         except Exception as e:
-#             print(f"[ERROR] Failed to launch QEMU for {executable_info['filename']}: {e}")
-#             return
-    
-#     # 监控循环
-#     CONTROL_CHAR_RGX = re.compile(r'[\x00-\x1f]+')
-#     with ThreadPoolExecutor(max_workers=10) as executor:
-#         try:
-#             buffer      = ""
-#             brace_count = 0
-#             qemu_exited = False
-#             exit_time   = None
-#             grace_period = 1.0  # 1 秒缓冲期
-
-#             start_time = time.time()
-#             timeout    = args.timeout
-
-#             while True:
-#                 if time.time() - start_time > timeout:
-#                     print(f"[TIMEOUT] Execution timeout for {CURRENT_EXECUTABLE}")
-#                     break
-                
-#                 # 2) 检查 QEMU 是否退出
-#                 if (not qemu_exited) and QEMU_PROCESS and QEMU_PROCESS.poll() is not None:
-#                     qemu_exited = True
-#                     exit_time   = time.time()
-#                     print(f"[INFO] QEMU exited with code {QEMU_PROCESS.poll()}, entering grace period…")
-                
-#                 # 3) 如果已经过了缓冲期，就退出循环
-#                 if qemu_exited and (time.time() - exit_time) > grace_period:
-#                     print("[DEBUG] Grace period elapsed, breaking monitor loop")
-#                     break
-                
-#                 # 4) 使用 select 检查是否有数据可读，超时时间设为 0.1 秒
-#                 readable, _, _ = select.select([monitor_process.stdout], [], [], 0.7)
-                
-#                 if not readable:
-#                     # 没有数据可读，继续循环
-#                     continue
-                
-#                 # 5) 读取数据（非阻塞）
-#                 try:
-#                     raw = monitor_process.stdout.readline()
-#                     if raw == "":  # bpftrace 进程自己结束
-#                         print("[DEBUG] monitor.bt EOF")
-#                         break
-#                 except IOError:
-#                     # 没有数据，继续
-#                     continue
-              
-#                 if isinstance(raw, bytes):
-#                     chunk = raw.decode('utf-8', errors='ignore')
-#                 else:
-#                     chunk = raw
-                
-#                 for ch in chunk:
-#                     if ch == "{":
-#                         if brace_count == 0:
-#                             buffer = ""
-#                         brace_count += 1
-                    
-#                     if brace_count > 0:
-#                         buffer += ch
-                    
-#                     if ch == "}":
-#                         brace_count -= 1
-#                         if brace_count == 0:
-#                             line = buffer.strip()
-#                             buffer = ""
-#                             line = CONTROL_CHAR_RGX.sub('', line)
-                            
-#                             try:
-#                                 data = json.loads(line)
-#                                 if data:
-#                                     # 添加当前可执行文件信息
-#                                     data['executable'] = executable_info['filename']
-                                    
-#                                     # 处理 PID 信息
-#                                     pid = data.get("pid")
-#                                     pre_pid = data.get("prev_pid")
-#                                     parent_pid = data.get("parent")
-#                                     child_pid = data.get("child")
-                                    
-#                                     # 收集所有相关的 PID
-#                                     for p in [parent_pid, child_pid, pre_pid, pid]:
-#                                         if p and p != 0:
-#                                             try:
-#                                                 pg = os.getpgid(p)
-#                                                 seen_pids.add(pg)
-#                                             except ProcessLookupError:
-#                                                 pass
-                                    
-#                                     # 获取事件类型
-#                                     event_type = data.get("event")
-#                                     evt_type = data.get("evt")
-#                                     target_analyzers = EVENT_ANALYZER_MAP.get(event_type, [])
-#                                     target_analyzers += EVT_ANALYZER_MAP.get(evt_type, [])
-                                    
-#                                     if not target_analyzers:
-#                                         continue
-                                    
-#                                     # 运行分析器
-#                                     futures = [executor.submit(run_analyzer, script, data) 
-#                                             for script in target_analyzers]
-#                                     results = [future.result() for future in futures]
-                                    
-#                                     if not results:
-#                                         continue
-                                    
-#                                     report = generate_report(results, executable_info['filename'])
-#                                     if not report:
-#                                         continue
-#                                     # 发送报告到 GUI
-#                                     if REPORT_GUI_PROCESS and REPORT_GUI_PROCESS.poll() is None:
-#                                         try:
-#                                             REPORT_GUI_PROCESS.stdin.write(report + "\n" + "="*50 + "\n")
-#                                             REPORT_GUI_PROCESS.stdin.flush()
-#                                         except (IOError, BrokenPipeError):
-#                                             print("[WARNING] Report GUI window was closed.")
-#                                             REPORT_GUI_PROCESS = None
-#                                     else:
-#                                         print(report)
-#                                         print("=" * 50)
-                                    
-#                                     # 处理隐藏的失败
-#                                     if hidden_failures:
-#                                         if auto_isolate:
-#                                             print("Auto-isolation: terminating ALL seen PIDs.")
-#                                             for p in list(seen_pids):
-#                                                 try:
-#                                                     os.killpg(p, signal.SIGTERM)
-#                                                     print(f"Terminated PGID {p}")
-#                                                 except Exception as e:
-#                                                     print(f"Error terminating PID {p}: {e}")
-#                                         else:
-#                                             print("Danger! Auto-isolation is off, but some PIDs could not be terminated")
-#                                         hidden_failures.clear()
-                            
-#                             except json.JSONDecodeError as e:
-#                                 # 静默跳过无效的 JSON
-#                                 continue
-        
-#         except KeyboardInterrupt:
-#             print(f"\n[INTERRUPTED] Stopping analysis of {executable_info['filename']}")
-        
-#         finally:
-#             # 清理进程
-#             if QEMU_PROCESS:
-#                 QEMU_PROCESS.terminate()
-#                 try:
-#                     QEMU_PROCESS.wait(timeout=5)
-#                 except subprocess.TimeoutExpired:
-#                     QEMU_PROCESS.kill()
-            
-#             # 停止监控线程
-#             if args.cgroup and 'monitor_stop' in locals():
-#                 monitor_stop.set()
-            
-#             # 清理 cgroup
-#             if CGROUP_PATH:
-#                 cleanup_cgroup()
-#                 CGROUP_PATH = None
 
 
 
@@ -898,6 +984,15 @@ def main():
     parser.add_argument('--pids-max', type=int, default=1000, help='cgroup max processes (default: 1000)')
     parser.add_argument('--fork-max', type=int, default=50, help='max fork (default: 50)')
     parser.add_argument('--timeout', type=int, default=60, help='timeout per executable in seconds (default: 60)')
+    parser.add_argument('--docker', action='store_true', help='Run binaries inside docker containers (multi-arch)')
+    parser.add_argument('--no-docker-staged', action='store_false', dest='docker_staged', default=True,
+                        help='Disable staged docker mode (attach bpftrace before exec). Enabled by default.')
+    parser.add_argument('--docker-force-qemu', action='store_true', dest='docker_force_qemu',
+                        help='Force executing binary via qemu-<arch> inside container even if host arch matches (requires qemu-user in image).')
+    parser.add_argument('--docker-no-cgroup', action='store_true', dest='docker_no_cgroup',
+                        help='Disable cgroup-wide tracing inside docker (fallback to prefix).')
+    parser.add_argument('--docker-force-cgroup', action='store_true', dest='docker_force_cgroup',
+                        help='Force cgroup-wide tracing; if unsupported will still fallback, but skip prefix fast path attempt.')
     
     args = parser.parse_args()
     
@@ -905,11 +1000,16 @@ def main():
     ans = input("Enable auto-isolation of all seen PIDs on hidden failures? [y/N]: ")
     auto_isolate = ans.strip().lower() == 'y'
     
-    # 如果启用 cgroup，检查权限
-    if args.cgroup and os.geteuid() != 0:
-        print("[ERROR] cgroup support requires root privileges")
-        print("Please run with sudo")
+    # 如果启用 cgroup，检查权限 (docker 模式下可不需要 root 仅当需要 cgroup 限制才要求)
+    if args.cgroup and os.geteuid() != 0 and not args.docker:
+        print("[ERROR] cgroup support requires root privileges (non-docker mode)")
         return
+
+    if args.docker and not _DOCKER_OK:
+        print("[ERROR] Docker mode requested but docker SDK not available. Install python3-docker.")
+        return
+    if args.docker and os.geteuid() != 0:
+        print("[WARNING] Running docker mode without root: bpftrace may produce no output (permission denied to tracepoints). Consider sudo.")
     
     # 运行架构分析器
     print(f"[SCAN] Analyzing executables in: {args.directory}")
@@ -940,6 +1040,7 @@ def main():
 
     try:
         # 串行运行每个可执行文件
+        docker_runner = DockerRunner() if args.docker and _DOCKER_OK else None
         for i, executable in enumerate(executables, 1):
             print(f"\n[PROGRESS] Processing {i}/{len(executables)}: {executable['filename']}")
 
@@ -962,12 +1063,18 @@ def main():
             # monitor_process.terminate()
             # monitor_process.wait()
             # print("[MONITOR] monitor.bt terminated for this executable.")
-            run_executable_monitoring(executable, args, auto_isolate)
-            time.sleep(0.01)  
+            if args.docker and docker_runner:
+                run_executable_monitoring_docker(executable, args, auto_isolate, docker_runner)
+            else:
+                run_executable_monitoring(executable, args, auto_isolate)
+            time.sleep(0.01)
         print("Would you like to exit the wrapper? [y/N]: ")
-        if input().strip().lower() == 'y':
-            print("Exiting wrapper...")
-            return
+        try:
+            if input().strip().lower() == 'y':
+                print("Exiting wrapper...")
+                return
+        except EOFError:
+            pass
     except KeyboardInterrupt:
         print("\n[INTERRUPTED] Analysis interrupted by user")
     

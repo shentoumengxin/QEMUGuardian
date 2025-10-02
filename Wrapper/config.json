@@ -16,7 +16,9 @@
     "CONNECT": ["./analyzers/ReverseShell.py"],
     "SIGNAL_GENERATE": ["./analyzers/AbnormalSignalHandling.py"],
     "READLINKAT": ["./analyzers/Reconnaissance.py"],
-    "DUP2": ["./analyzers/ReverseShell.py"]
+    "DUP2": ["./analyzers/ReverseShell.py"],
+    "TRACK_DOCKER_BIN": ["./analyzers/CodeInjection.py", "./analyzers/FilelessExecution.py"],
+    "MPROTECT": ["./analyzers/MemoryCorruption.py"]
   },
   "EVT_ANALYZER_MAP": {
     "MMAP_SUM": ["./analyzers/MemoryCorruption.py"]
